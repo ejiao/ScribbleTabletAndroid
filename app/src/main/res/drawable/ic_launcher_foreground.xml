@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Pencil icon -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M54,30 L78,54 L54,78 L30,54 Z"/>
+
+    <!-- Sparkle/magic effect -->
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M70,38 L72,42 L76,40 L74,44 L78,46 L74,48 L76,52 L72,50 L70,54 L68,50 L64,52 L66,48 L62,46 L66,44 L64,40 L68,42 Z"/>
+
+</vector>
