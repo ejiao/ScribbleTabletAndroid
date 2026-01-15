@@ -21,7 +21,7 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
 sealed class GenerationError : Exception() {
-    data object ImageEncodingFailed : GenerationError()
+    object ImageEncodingFailed : GenerationError()
     data class NetworkError(override val message: String) : GenerationError()
     data class ServerError(val code: Int, val body: String) : GenerationError()
     data class DecodingError(override val message: String) : GenerationError()
