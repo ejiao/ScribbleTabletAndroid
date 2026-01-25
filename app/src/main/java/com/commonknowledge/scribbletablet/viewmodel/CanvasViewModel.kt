@@ -6,6 +6,7 @@ import android.graphics.RectF
 import android.util.Log
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.neverEqualPolicy
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.commonknowledge.scribbletablet.data.model.*
@@ -48,7 +49,11 @@ class CanvasViewModel : ViewModel() {
     // Drawing state
     val permanentPaths = mutableStateListOf<DrawingPath>()
     val magicPaths = mutableStateListOf<DrawingPath>()
-    var currentPath = mutableStateOf<DrawingPath?>(null)
+    // Use neverEqualPolicy to always trigger recomposition when currentPath is assigned,
+    // even if the object reference is the same. This avoids creating new objects for every point.
+    var currentPath = mutableStateOf<DrawingPath?>(null, neverEqualPolicy())
+    // Version counter to force recomposition without object allocation
+    var currentPathVersion = mutableStateOf(0L)
 
     // Cards
     val cards = mutableStateListOf<CanvasCard>()
@@ -222,16 +227,12 @@ class CanvasViewModel : ViewModel() {
 
     fun addToPath(x: Float, y: Float, pressure: Float = 1f) {
         currentPath.value?.let { path ->
-            // Create a completely new DrawingPath with new points list to ensure
-            // Compose detects the change (data class equals uses structural equality)
-            val newPoints = path.points.toMutableList()
-            newPoints.add(PathPoint(x, y, pressure))
-            currentPath.value = DrawingPath(
-                points = newPoints,
-                isMagicInk = path.isMagicInk,
-                strokeWidth = path.strokeWidth,
-                color = path.color
-            )
+            // Mutate the existing path's points list directly
+            path.points.add(PathPoint(x, y, pressure))
+            // Increment version to trigger recomposition (neverEqualPolicy ensures this works)
+            currentPathVersion.value++
+            // Reassign to trigger state change (neverEqualPolicy means same reference still triggers)
+            currentPath.value = path
         }
     }
 

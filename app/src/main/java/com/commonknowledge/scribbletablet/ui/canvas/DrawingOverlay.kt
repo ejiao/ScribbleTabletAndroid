@@ -26,13 +26,19 @@ fun DrawingOverlay(
     val offsetX = viewModel.canvasOffsetX.value
     val offsetY = viewModel.canvasOffsetY.value
 
-    // IMPORTANT: Read state values at composable level to trigger recomposition
-    // Reading inside Canvas draw scope does NOT trigger recomposition!
+    // Read state values at composable level to trigger recomposition
     val currentPath = viewModel.currentPath.value
-    val permanentPaths = viewModel.permanentPaths.toList()
-    val magicPaths = viewModel.magicPaths.toList()
+    // Read version to ensure recomposition on point additions (works with neverEqualPolicy)
+    val _ = viewModel.currentPathVersion.value
 
-    // Shimmer animation for magic ink
+    // Read the snapshot state lists directly - they're already observable
+    val permanentPaths = viewModel.permanentPaths
+    val magicPaths = viewModel.magicPaths
+
+    // Check if we have any magic ink to animate
+    val hasMagicInk = magicPaths.isNotEmpty() || (currentPath?.isMagicInk == true)
+
+    // Shimmer animation - always create but only use when there's magic ink
     val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
     val shimmerTime by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -61,16 +67,18 @@ fun DrawingOverlay(
             }
 
             // Draw current path (the one being actively drawn)
+            // Use fast line-based rendering for lower latency during active drawing
             currentPath?.let { path ->
-                drawStrokePath(path)
-                if (path.isMagicInk) {
-                    drawMagicInkShimmerOverlay(path, shimmerTime)
-                }
+                drawStrokePathFast(path)
+                // Skip shimmer during active drawing for performance
             }
         }
     }
 }
 
+/**
+ * Draw a path with smooth bezier curves. Used for completed strokes.
+ */
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePath(path: DrawingPath) {
     if (path.points.size < 2) return
 
@@ -107,6 +115,30 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePath(path
             join = StrokeJoin.Round
         )
     )
+}
+
+/**
+ * Draw path using simple lines for better performance during active drawing.
+ * Trades visual smoothness for lower latency.
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePathFast(path: DrawingPath) {
+    if (path.points.size < 2) return
+
+    val color = Color(path.color)
+    val strokeWidth = path.strokeWidth
+
+    // Draw simple line segments - much faster than bezier curves
+    for (i in 1 until path.points.size) {
+        val prev = path.points[i - 1]
+        val curr = path.points[i]
+        drawLine(
+            color = color,
+            start = Offset(prev.x, prev.y),
+            end = Offset(curr.x, curr.y),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round
+        )
+    }
 }
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMagicInkShimmerOverlay(
