@@ -49,11 +49,11 @@ class CanvasViewModel : ViewModel() {
     // Drawing state
     val permanentPaths = mutableStateListOf<DrawingPath>()
     val magicPaths = mutableStateListOf<DrawingPath>()
-    // Use neverEqualPolicy to always trigger recomposition when currentPath is assigned,
-    // even if the object reference is the same. This avoids creating new objects for every point.
+    // Use neverEqualPolicy to always trigger recomposition when currentPath is assigned
     var currentPath = mutableStateOf<DrawingPath?>(null, neverEqualPolicy())
-    // Version counter to force recomposition without object allocation
-    var currentPathVersion = mutableStateOf(0L)
+
+    // For pressure smoothing (reduces jitter)
+    private var lastSmoothedPressure = 0.5f
 
     // Cards
     val cards = mutableStateListOf<CanvasCard>()
@@ -218,6 +218,9 @@ class CanvasViewModel : ViewModel() {
         val isMagic = activeMode.value == ToolMode.MAGIC_INK
         val color = if (isMagic) 0xFF4CAF50.toInt() else android.graphics.Color.BLACK
 
+        // Reset pressure smoothing for new stroke
+        lastSmoothedPressure = pressure
+
         currentPath.value = DrawingPath(
             points = mutableListOf(PathPoint(x, y, pressure)),
             isMagicInk = isMagic,
@@ -227,16 +230,19 @@ class CanvasViewModel : ViewModel() {
 
     fun addToPath(x: Float, y: Float, pressure: Float = 1f) {
         currentPath.value?.let { path ->
-            // Light decimation - skip only very close points (< 1px)
             val lastPoint = path.points.lastOrNull()
+
+            // Skip only identical points
             if (lastPoint != null) {
                 val dx = x - lastPoint.x
                 val dy = y - lastPoint.y
-                if (dx * dx + dy * dy < 1f) return
+                if (dx * dx + dy * dy < 0.5f) return
             }
 
-            path.points.add(PathPoint(x, y, pressure))
-            currentPathVersion.value++
+            // Smooth pressure to reduce jitter (exponential moving average)
+            lastSmoothedPressure = lastSmoothedPressure * 0.3f + pressure * 0.7f
+
+            path.points.add(PathPoint(x, y, lastSmoothedPressure))
             currentPath.value = path
         }
     }

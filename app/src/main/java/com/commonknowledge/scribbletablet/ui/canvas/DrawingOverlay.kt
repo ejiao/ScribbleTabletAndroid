@@ -25,11 +25,6 @@ fun DrawingOverlay(
 
     // Read state values at composable level to trigger recomposition
     val currentPath = viewModel.currentPath.value
-    // Read version to ensure recomposition on point additions (works with neverEqualPolicy)
-    @Suppress("UNUSED_VARIABLE")
-    val pathVersion = viewModel.currentPathVersion.value
-
-    // Read the snapshot state lists directly - they're already observable
     val permanentPaths = viewModel.permanentPaths
     val magicPaths = viewModel.magicPaths
 
@@ -48,19 +43,22 @@ fun DrawingOverlay(
                 drawStrokePathFast(path)
             }
 
-            // Draw current path
+            // Draw current path with predictive extension for lower perceived latency
             currentPath?.let { path ->
-                drawStrokePathFast(path)
+                drawStrokePathFast(path, predictive = true)
             }
         }
     }
 }
 
 /**
- * Draw path with pressure-sensitive width - varies stroke width based on pen pressure.
- * Uses individual segments for variable width rendering.
+ * Draw path with pressure-sensitive width and predictive extension.
+ * Varies stroke width based on pen pressure and extends slightly in direction of movement.
  */
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePathFast(path: DrawingPath) {
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePathFast(
+    path: DrawingPath,
+    predictive: Boolean = false
+) {
     if (path.points.size < 2) return
 
     val points = path.points
@@ -76,7 +74,6 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePathFast(
 
         // Interpolate pressure between points for smooth width transitions
         val avgPressure = (prev.pressure + curr.pressure) / 2f
-        // Map pressure (typically 0-1) to stroke width
         val strokeWidth = minWidth + (maxWidth - minWidth) * avgPressure.coerceIn(0f, 1f)
 
         drawLine(
@@ -84,6 +81,30 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePathFast(
             start = Offset(prev.x, prev.y),
             end = Offset(curr.x, curr.y),
             strokeWidth = strokeWidth,
+            cap = StrokeCap.Round
+        )
+    }
+
+    // Predictive extension: draw slightly ahead based on velocity
+    if (predictive && points.size >= 3) {
+        val n = points.size
+        val p1 = points[n - 2]
+        val p2 = points[n - 1]
+
+        // Calculate velocity
+        val vx = p2.x - p1.x
+        val vy = p2.y - p1.y
+
+        // Extend 30% ahead
+        val predictX = p2.x + vx * 0.3f
+        val predictY = p2.y + vy * 0.3f
+        val strokeWidth = minWidth + (maxWidth - minWidth) * p2.pressure.coerceIn(0f, 1f)
+
+        drawLine(
+            color = color,
+            start = Offset(p2.x, p2.y),
+            end = Offset(predictX, predictY),
+            strokeWidth = strokeWidth * 0.8f, // Slightly thinner for prediction
             cap = StrokeCap.Round
         )
     }
