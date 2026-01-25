@@ -7,7 +7,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import com.commonknowledge.scribbletablet.data.model.DrawingPath
 import com.commonknowledge.scribbletablet.viewmodel.CanvasViewModel
@@ -55,14 +54,14 @@ fun DrawingOverlay(
             translate(offsetX, offsetY)
             scale(scale, scale, Offset.Zero)
         }) {
-            // Draw permanent paths
+            // Draw permanent paths (use fast rendering - minimal smoothing)
             permanentPaths.forEach { path ->
-                drawStrokePath(path)
+                drawStrokePathFast(path)
             }
 
             // Draw magic paths with shimmer effect
             magicPaths.forEach { path ->
-                drawStrokePath(path)
+                drawStrokePathFast(path)
                 drawMagicInkShimmerOverlay(path, shimmerTime)
             }
 
@@ -77,49 +76,7 @@ fun DrawingOverlay(
 }
 
 /**
- * Draw a path with smooth bezier curves. Used for completed strokes.
- */
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePath(path: DrawingPath) {
-    if (path.points.size < 2) return
-
-    val androidPath = Path()
-    val firstPoint = path.points.first()
-    androidPath.moveTo(firstPoint.x, firstPoint.y)
-
-    for (i in 1 until path.points.size) {
-        val point = path.points[i]
-        val prevPoint = path.points[i - 1]
-
-        // Use quadratic bezier for smoother lines
-        val midX = (prevPoint.x + point.x) / 2
-        val midY = (prevPoint.y + point.y) / 2
-
-        androidPath.quadraticBezierTo(
-            prevPoint.x,
-            prevPoint.y,
-            midX,
-            midY
-        )
-    }
-
-    // Draw the last point
-    val lastPoint = path.points.last()
-    androidPath.lineTo(lastPoint.x, lastPoint.y)
-
-    drawPath(
-        path = androidPath,
-        color = Color(path.color),
-        style = Stroke(
-            width = path.strokeWidth,
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round
-        )
-    )
-}
-
-/**
- * Draw path using simple lines for better performance during active drawing.
- * Trades visual smoothness for lower latency.
+ * Draw path using simple line segments - fast and minimal smoothing.
  */
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePathFast(path: DrawingPath) {
     if (path.points.size < 2) return
@@ -173,18 +130,6 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMagicInkShimmer
         val endIdx = minOf(path.points.size - 1, pointIndex + segmentRadius)
 
         if (endIdx > startIdx) {
-            val shimmerPath = Path()
-            shimmerPath.moveTo(path.points[startIdx].x, path.points[startIdx].y)
-
-            for (i in startIdx + 1..endIdx) {
-                val point = path.points[i]
-                val prevPoint = path.points[i - 1]
-                val midX = (prevPoint.x + point.x) / 2
-                val midY = (prevPoint.y + point.y) / 2
-                shimmerPath.quadraticBezierTo(prevPoint.x, prevPoint.y, midX, midY)
-            }
-            shimmerPath.lineTo(path.points[endIdx].x, path.points[endIdx].y)
-
             val highlightColor = Color(
                 red = minOf(1f, baseColor.red + 0.3f * intensity),
                 green = minOf(1f, baseColor.green + 0.2f * intensity),
@@ -192,15 +137,18 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMagicInkShimmer
                 alpha = 0.6f * intensity
             )
 
-            drawPath(
-                path = shimmerPath,
-                color = highlightColor,
-                style = Stroke(
-                    width = path.strokeWidth * 0.6f,
-                    cap = StrokeCap.Round,
-                    join = StrokeJoin.Round
+            // Draw shimmer as simple lines
+            for (i in startIdx + 1..endIdx) {
+                val prev = path.points[i - 1]
+                val curr = path.points[i]
+                drawLine(
+                    color = highlightColor,
+                    start = Offset(prev.x, prev.y),
+                    end = Offset(curr.x, curr.y),
+                    strokeWidth = path.strokeWidth * 0.6f,
+                    cap = StrokeCap.Round
                 )
-            )
+            }
         }
     }
 }
