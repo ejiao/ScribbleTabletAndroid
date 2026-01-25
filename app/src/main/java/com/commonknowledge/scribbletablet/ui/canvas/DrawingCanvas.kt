@@ -173,11 +173,12 @@ fun DrawingCanvas(
                 // Consider it a stylus if either method detects it
                 val isStylus = isToolTypeStylus || isSourceStylus
 
+                // TODO: Onyx SDK not receiving input - temporarily disabled to use Compose fallback
                 // On Onyx devices, pen input is handled by OnyxDrawingSurface overlay
                 // Let the event pass through so the overlay can handle it
-                if (isOnyxDevice && (isStylus || isStylusEraser)) {
-                    return@pointerInteropFilter false
-                }
+                // if (isOnyxDevice && (isStylus || isStylusEraser)) {
+                //     return@pointerInteropFilter false
+                // }
 
                 // Transform touch coordinates to canvas coordinates
                 val touchX = (event.x - offsetX) / scale
@@ -188,6 +189,8 @@ fun DrawingCanvas(
                         // Stylus always draws, finger pans
                         if (isStylus || isStylusEraser) {
                             isPanning = false
+                            // Enable fast e-ink refresh for responsive drawing
+                            OnyxHelper.enableFastRefresh(view)
                             when {
                                 isStylusEraser || mode == ToolMode.ERASER -> {
                                     isErasing = true
@@ -216,10 +219,12 @@ fun DrawingCanvas(
                         if (isDrawing) {
                             viewModel.endPath()
                             isDrawing = false
+                            OnyxHelper.resetRefresh(view)
                         }
                         if (isErasing) {
                             viewModel.endErase()
                             isErasing = false
+                            OnyxHelper.resetRefresh(view)
                         }
                         isPanning = false
 
@@ -237,12 +242,27 @@ fun DrawingCanvas(
                     MotionEvent.ACTION_MOVE -> {
                         when {
                             (isStylus || isStylusEraser) && isErasing -> {
+                                // Process historical events for smoother erasing
+                                for (i in 0 until event.historySize) {
+                                    val histX = (event.getHistoricalX(i) - offsetX) / scale
+                                    val histY = (event.getHistoricalY(i) - offsetY) / scale
+                                    viewModel.erasePath(histX, histY)
+                                }
                                 viewModel.erasePath(touchX, touchY)
                                 true
                             }
                             (isStylus || isStylusEraser) && isDrawing -> {
                                 when {
                                     mode == ToolMode.PERMANENT_INK || mode == ToolMode.MAGIC_INK -> {
+                                        // Process historical events for smoother strokes
+                                        // This captures all batched points between events
+                                        for (i in 0 until event.historySize) {
+                                            val histX = (event.getHistoricalX(i) - offsetX) / scale
+                                            val histY = (event.getHistoricalY(i) - offsetY) / scale
+                                            val histPressure = event.getHistoricalPressure(i)
+                                            viewModel.addToPathNoRecompose(histX, histY, histPressure)
+                                        }
+                                        // Final point triggers recomposition
                                         viewModel.addToPath(touchX, touchY, event.pressure)
                                     }
                                 }
@@ -312,6 +332,8 @@ fun DrawingCanvas(
                             viewModel.endErase()
                             isErasing = false
                         }
+                        // Reset e-ink refresh mode after drawing/erasing ends
+                        OnyxHelper.resetRefresh(view)
                         isPanning = false
                         lastPinchDistance = 0f
                         true

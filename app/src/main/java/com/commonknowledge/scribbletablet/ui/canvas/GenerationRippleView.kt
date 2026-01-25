@@ -92,14 +92,14 @@ private fun SingleRipple(
         val endRadius = maxDimension * 0.9f
         val currentRadius = startRadius + (endRadius - startRadius) * progress
 
-        // Darker green color for better visibility
-        val rippleColor = Color(0xFF1B5E20) // Dark green
+        // Gray color so it doesn't blend with green magic ink
+        val rippleColor = Color(0xFF424242) // Dark gray
 
-        // Draw radial gradient ripple
+        // Draw radial gradient ripple (lower opacity so magic ink stays visible above)
         val gradient = Brush.radialGradient(
             colors = listOf(
-                rippleColor.copy(alpha = alpha * 0.7f),
-                rippleColor.copy(alpha = alpha * 0.4f),
+                rippleColor.copy(alpha = alpha * 0.3f),
+                rippleColor.copy(alpha = alpha * 0.15f),
                 rippleColor.copy(alpha = 0f)
             ),
             center = Offset(centerX, centerY),

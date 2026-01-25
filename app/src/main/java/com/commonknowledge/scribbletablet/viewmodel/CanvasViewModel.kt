@@ -55,6 +55,9 @@ class CanvasViewModel : ViewModel() {
     // For pressure smoothing (reduces jitter)
     private var lastSmoothedPressure = 0.5f
 
+    // When true, addToPath won't trigger Compose recomposition (for Onyx SDK rendering)
+    var deferCurrentPathUpdates = false
+
     // Cards
     val cards = mutableStateListOf<CanvasCard>()
 
@@ -107,6 +110,20 @@ class CanvasViewModel : ViewModel() {
 
     // Snapshot callback - set by the canvas composable
     var snapshotCallback: (() -> Bitmap?)? = null
+
+    // Real-time stroke rendering callback - bypasses Compose recomposition
+    // Set by RealtimeStrokeView to receive direct updates during drawing
+    var realtimeStrokeCallback: ((List<PathPoint>?) -> Unit)? = null
+
+    // Direct segment callback - even faster, just draws one segment at a time
+    // Signature: (fromX, fromY, toX, toY, pressure) -> Unit
+    var directSegmentCallback: ((Float, Float, Float, Float, Float) -> Unit)? = null
+
+    // Callback to clear the stroke view
+    var clearStrokeCallback: (() -> Unit)? = null
+
+    // Internal buffer for current stroke points (used with realtimeStrokeCallback)
+    private val currentStrokePoints = mutableListOf<PathPoint>()
 
     private fun updateUndoRedoState() {
         canUndo.value = undoStack.isNotEmpty()
@@ -221,6 +238,16 @@ class CanvasViewModel : ViewModel() {
         // Reset pressure smoothing for new stroke
         lastSmoothedPressure = pressure
 
+        // Initialize stroke point buffer for realtime rendering
+        if (directSegmentCallback != null || realtimeStrokeCallback != null) {
+            currentStrokePoints.clear()
+            currentStrokePoints.add(PathPoint(x, y, pressure))
+            // Only invoke full callback if not using direct segment mode
+            if (directSegmentCallback == null) {
+                realtimeStrokeCallback?.invoke(currentStrokePoints.toList())
+            }
+        }
+
         currentPath.value = DrawingPath(
             points = mutableListOf(PathPoint(x, y, pressure)),
             isMagicInk = isMagic,
@@ -228,26 +255,94 @@ class CanvasViewModel : ViewModel() {
         )
     }
 
+    /**
+     * Add point to path without triggering recomposition.
+     * Use this for historical/batched events, then call addToPath for the final point.
+     */
+    fun addToPathNoRecompose(x: Float, y: Float, pressure: Float = 1f) {
+        val lastPoint = if (directSegmentCallback != null || realtimeStrokeCallback != null) {
+            currentStrokePoints.lastOrNull()
+        } else {
+            currentPath.value?.points?.lastOrNull()
+        }
+
+        // Skip only identical points
+        if (lastPoint != null) {
+            val dx = x - lastPoint.x
+            val dy = y - lastPoint.y
+            if (dx * dx + dy * dy < 0.5f) return
+        }
+
+        // Smooth pressure to reduce jitter (exponential moving average)
+        lastSmoothedPressure = lastSmoothedPressure * 0.3f + pressure * 0.7f
+        val point = PathPoint(x, y, lastSmoothedPressure)
+
+        // FASTEST PATH: Direct segment callback - just draw the new segment
+        if (directSegmentCallback != null && lastPoint != null) {
+            directSegmentCallback?.invoke(lastPoint.x, lastPoint.y, x, y, lastSmoothedPressure)
+            currentStrokePoints.add(point)
+            currentPath.value?.points?.add(point)
+            return
+        }
+
+        // Add to realtime buffer if available
+        if (realtimeStrokeCallback != null) {
+            currentStrokePoints.add(point)
+        }
+
+        // Also add to currentPath for fallback/final storage
+        currentPath.value?.points?.add(point)
+    }
+
     fun addToPath(x: Float, y: Float, pressure: Float = 1f) {
-        currentPath.value?.let { path ->
-            val lastPoint = path.points.lastOrNull()
+        val lastPoint = if (directSegmentCallback != null || realtimeStrokeCallback != null) {
+            currentStrokePoints.lastOrNull()
+        } else {
+            currentPath.value?.points?.lastOrNull()
+        }
 
-            // Skip only identical points
-            if (lastPoint != null) {
-                val dx = x - lastPoint.x
-                val dy = y - lastPoint.y
-                if (dx * dx + dy * dy < 0.5f) return
+        // Skip only identical points
+        if (lastPoint != null) {
+            val dx = x - lastPoint.x
+            val dy = y - lastPoint.y
+            if (dx * dx + dy * dy < 0.5f) return
+        }
+
+        // Smooth pressure to reduce jitter (exponential moving average)
+        lastSmoothedPressure = lastSmoothedPressure * 0.3f + pressure * 0.7f
+        val point = PathPoint(x, y, lastSmoothedPressure)
+
+        // FASTEST PATH: Direct segment callback - just draw the new segment
+        if (directSegmentCallback != null && lastPoint != null) {
+            directSegmentCallback?.invoke(lastPoint.x, lastPoint.y, x, y, lastSmoothedPressure)
+            currentStrokePoints.add(point)
+            currentPath.value?.points?.add(point)
+            return
+        }
+
+        // Add to realtime buffer and update view directly (no Compose recomposition)
+        if (realtimeStrokeCallback != null) {
+            currentStrokePoints.add(point)
+            realtimeStrokeCallback?.invoke(currentStrokePoints.toList())
+            // Also add to currentPath but don't trigger recomposition
+            currentPath.value?.points?.add(point)
+        } else {
+            // Fallback: trigger Compose recomposition
+            currentPath.value?.let { path ->
+                path.points.add(point)
+                currentPath.value = path
             }
-
-            // Smooth pressure to reduce jitter (exponential moving average)
-            lastSmoothedPressure = lastSmoothedPressure * 0.3f + pressure * 0.7f
-
-            path.points.add(PathPoint(x, y, lastSmoothedPressure))
-            currentPath.value = path
         }
     }
 
     fun endPath() {
+        // Clear realtime view first
+        if (directSegmentCallback != null || realtimeStrokeCallback != null) {
+            clearStrokeCallback?.invoke()
+            realtimeStrokeCallback?.invoke(null)
+            currentStrokePoints.clear()
+        }
+
         currentPath.value?.let { path ->
             if (path.points.size > 1) {
                 if (path.isMagicInk) {
@@ -261,6 +356,32 @@ class CanvasViewModel : ViewModel() {
             }
         }
         currentPath.value = null
+    }
+
+    /**
+     * Add a complete stroke at once (used by Onyx SDK for zero-overhead drawing).
+     * All points are provided at stroke end, avoiding per-point processing during drawing.
+     */
+    fun addCompleteStroke(points: List<PathPoint>, mode: ToolMode) {
+        if (points.size < 2) return
+
+        val isMagic = mode == ToolMode.MAGIC_INK
+        val color = if (isMagic) 0xFF4CAF50.toInt() else android.graphics.Color.BLACK
+
+        val path = DrawingPath(
+            points = points.toMutableList(),
+            isMagicInk = isMagic,
+            color = color
+        )
+
+        if (isMagic) {
+            magicPaths.add(path)
+            pushUndo(UndoableAction.AddMagicPath(path))
+        } else {
+            permanentPaths.add(path)
+            pushUndo(UndoableAction.AddPermanentPath(path))
+        }
+        markNeedsSave()
     }
 
     // Track erased paths for undo

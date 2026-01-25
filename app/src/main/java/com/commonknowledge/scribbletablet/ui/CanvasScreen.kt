@@ -34,10 +34,12 @@ import com.commonknowledge.scribbletablet.data.model.CanvasCard
 import com.commonknowledge.scribbletablet.data.model.CardType
 import com.commonknowledge.scribbletablet.data.model.DrawingPath
 import com.commonknowledge.scribbletablet.data.model.ToolMode
+import androidx.compose.ui.viewinterop.AndroidView
 import com.commonknowledge.scribbletablet.ui.canvas.DrawingCanvas
 import com.commonknowledge.scribbletablet.ui.canvas.DrawingOverlay
 import com.commonknowledge.scribbletablet.ui.canvas.GenerationRippleView
 import com.commonknowledge.scribbletablet.ui.canvas.OnyxDrawingSurface
+import com.commonknowledge.scribbletablet.ui.canvas.RealtimeStrokeView
 import com.commonknowledge.scribbletablet.ui.cards.CardView
 import com.commonknowledge.scribbletablet.ui.cards.ExpandedCardOverlay
 import com.commonknowledge.scribbletablet.ui.components.AudioRecorderView
@@ -110,10 +112,10 @@ fun CanvasScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Generation ripple animation overlay
+        // Generation ripple animation overlay (below drawing overlay so magic ink stays visible)
         GenerationRippleView(
             isVisible = isGenerating,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize().zIndex(1f)
         )
 
         // Cards overlay - use key() to maintain card identity across recompositions
@@ -141,18 +143,45 @@ fun CanvasScreen(
             }
         }
 
-        // Drawing overlay - renders strokes above cards
+        // Drawing overlay - renders completed strokes above cards
         DrawingOverlay(
             viewModel = viewModel,
             modifier = Modifier.fillMaxSize().zIndex(150f)
         )
 
-        // Onyx drawing surface - transparent overlay for fast e-ink pen rendering
-        // Only rendered on Onyx devices, handles pen input directly via SDK
-        OnyxDrawingSurface(
-            viewModel = viewModel,
-            modifier = Modifier.fillMaxSize().zIndex(160f)
+        // Real-time stroke view - renders current stroke with minimal latency
+        // Uses Android Canvas directly, bypassing Compose recomposition
+        val scale = viewModel.canvasScale.value
+        val offsetX = viewModel.canvasOffsetX.value
+        val offsetY = viewModel.canvasOffsetY.value
+        val activeMode = viewModel.activeMode.value
+        val strokeColor = if (activeMode == ToolMode.MAGIC_INK) 0xFF4CAF50.toInt() else android.graphics.Color.BLACK
+
+        AndroidView(
+            modifier = Modifier.fillMaxSize().zIndex(155f),
+            factory = { context ->
+                RealtimeStrokeView(context).apply {
+                    // Register callback with ViewModel
+                    viewModel.realtimeStrokeCallback = { points ->
+                        updateCurrentStroke(points)
+                    }
+                }
+            },
+            update = { view ->
+                view.setTransform(scale, offsetX, offsetY)
+                view.setStrokeStyle(strokeColor, 3f)
+            }
         )
+
+        // Onyx drawing surface - DISABLED
+        // The Onyx SDK cannot access raw input devices on this device/Android version.
+        // Falling back to Compose-based drawing which works but is slower.
+        // TODO: Re-enable if Onyx SDK issues are resolved
+        // OnyxDrawingSurface(
+        //     viewModel = viewModel,
+        //     modifier = Modifier.fillMaxSize().zIndex(160f),
+        //     isVisible = !showingWorkspaceMenu && !viewModel.isCardExpanded.value
+        // )
 
         // Expanded card overlay - rendered below toolbar (zIndex 190 < toolbar 200)
         val expandedCardId = viewModel.expandedCardId.value

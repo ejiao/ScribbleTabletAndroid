@@ -43,9 +43,9 @@ class OnyxDrawingSurfaceView @JvmOverloads constructor(
     private var isInitialized = false
 
     interface Callback {
-        fun onBeginDrawing(point: PathPoint)
-        fun onDrawingMove(point: PathPoint)
-        fun onEndDrawing(point: PathPoint)
+        // Called once at stroke end with all points (zero overhead during drawing)
+        fun onStrokeComplete(points: List<PathPoint>)
+        // Erasing still needs real-time feedback
         fun onBeginErasing(point: PathPoint)
         fun onErasingMove(point: PathPoint)
         fun onEndErasing(point: PathPoint)
@@ -67,9 +67,12 @@ class OnyxDrawingSurfaceView @JvmOverloads constructor(
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
+        android.util.Log.d("OnyxDrawingSurface", "surfaceCreated: width=$width, height=$height, isInitialized=$isInitialized")
         // Initialize TouchHelper when surface is ready
         if (!isInitialized && width > 0 && height > 0) {
             initTouchHelper()
+        } else {
+            android.util.Log.w("OnyxDrawingSurface", "NOT initializing TouchHelper: isInitialized=$isInitialized, dimensions=${width}x${height}")
         }
     }
 
@@ -96,113 +99,104 @@ class OnyxDrawingSurfaceView @JvmOverloads constructor(
             // Create handler for main thread callbacks
             val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
+            val strokeBuffer = java.util.ArrayList<com.onyx.android.sdk.data.note.TouchPoint>(500)
+            val eraseBuffer = java.util.ArrayList<com.onyx.android.sdk.data.note.TouchPoint>(500)
+
             val rawCallback = object : com.onyx.android.sdk.pen.RawInputCallback() {
                 override fun onBeginRawDrawing(b: Boolean, touchPoint: com.onyx.android.sdk.data.note.TouchPoint) {
-                    val point = touchPoint.toPathPoint()
-                    // Use postAtFrontOfQueue for lowest latency when not on main thread
-                    if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-                        callback?.onBeginDrawing(point)
-                    } else {
-                        mainHandler.postAtFrontOfQueue { callback?.onBeginDrawing(point) }
-                    }
+                    android.util.Log.d("OnyxDrawingSurface", "onBeginRawDrawing: x=${touchPoint.x}, y=${touchPoint.y}")
+                    strokeBuffer.clear()
+                    strokeBuffer.add(touchPoint)
                 }
 
                 override fun onRawDrawingTouchPointMoveReceived(touchPoint: com.onyx.android.sdk.data.note.TouchPoint) {
-                    val point = touchPoint.toPathPoint()
-                    if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-                        callback?.onDrawingMove(point)
-                    } else {
-                        mainHandler.postAtFrontOfQueue { callback?.onDrawingMove(point) }
-                    }
+                    strokeBuffer.add(touchPoint)
                 }
 
                 override fun onRawDrawingTouchPointListReceived(touchPointList: com.onyx.android.sdk.pen.data.TouchPointList) {
                     val count = touchPointList.size()
-                    // Pre-convert all points to avoid work on main thread
-                    val points = Array(count) { i -> touchPointList.get(i).toPathPoint() }
-
-                    if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-                        points.forEach { callback?.onDrawingMove(it) }
-                    } else {
-                        mainHandler.postAtFrontOfQueue {
-                            points.forEach { callback?.onDrawingMove(it) }
-                        }
+                    for (i in 0 until count) {
+                        strokeBuffer.add(touchPointList.get(i))
                     }
                 }
 
                 override fun onEndRawDrawing(b: Boolean, touchPoint: com.onyx.android.sdk.data.note.TouchPoint) {
-                    val point = touchPoint.toPathPoint()
-                    if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-                        callback?.onEndDrawing(point)
-                    } else {
-                        mainHandler.postAtFrontOfQueue { callback?.onEndDrawing(point) }
+                    strokeBuffer.add(touchPoint)
+                    android.util.Log.d("OnyxDrawingSurface", "onEndRawDrawing: collected ${strokeBuffer.size} points")
+
+                    val points = ArrayList<PathPoint>(strokeBuffer.size)
+                    for (tp in strokeBuffer) {
+                        points.add(PathPoint(tp.x, tp.y, tp.pressure))
+                    }
+                    strokeBuffer.clear()
+
+                    mainHandler.post {
+                        callback?.onStrokeComplete(points)
                     }
                 }
 
                 override fun onBeginRawErasing(b: Boolean, touchPoint: com.onyx.android.sdk.data.note.TouchPoint) {
-                    val point = touchPoint.toPathPoint()
-                    if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-                        callback?.onBeginErasing(point)
-                    } else {
-                        mainHandler.postAtFrontOfQueue { callback?.onBeginErasing(point) }
-                    }
+                    eraseBuffer.clear()
+                    eraseBuffer.add(touchPoint)
+                    val point = PathPoint(touchPoint.x, touchPoint.y, touchPoint.pressure)
+                    mainHandler.post { callback?.onBeginErasing(point) }
                 }
 
                 override fun onRawErasingTouchPointMoveReceived(touchPoint: com.onyx.android.sdk.data.note.TouchPoint) {
-                    val point = touchPoint.toPathPoint()
-                    if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-                        callback?.onErasingMove(point)
-                    } else {
-                        mainHandler.postAtFrontOfQueue { callback?.onErasingMove(point) }
-                    }
+                    eraseBuffer.add(touchPoint)
+                    val point = PathPoint(touchPoint.x, touchPoint.y, touchPoint.pressure)
+                    mainHandler.post { callback?.onErasingMove(point) }
                 }
 
                 override fun onRawErasingTouchPointListReceived(touchPointList: com.onyx.android.sdk.pen.data.TouchPointList) {
                     val count = touchPointList.size()
-                    val points = Array(count) { i -> touchPointList.get(i).toPathPoint() }
-                    if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-                        points.forEach { callback?.onErasingMove(it) }
-                    } else {
-                        mainHandler.postAtFrontOfQueue {
-                            points.forEach { callback?.onErasingMove(it) }
-                        }
+                    for (i in 0 until count) {
+                        val tp = touchPointList.get(i)
+                        eraseBuffer.add(tp)
+                        val point = PathPoint(tp.x, tp.y, tp.pressure)
+                        mainHandler.post { callback?.onErasingMove(point) }
                     }
                 }
 
                 override fun onEndRawErasing(b: Boolean, touchPoint: com.onyx.android.sdk.data.note.TouchPoint) {
-                    val point = touchPoint.toPathPoint()
-                    if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-                        callback?.onEndErasing(point)
-                    } else {
-                        mainHandler.postAtFrontOfQueue { callback?.onEndErasing(point) }
-                    }
+                    eraseBuffer.clear()
+                    val point = PathPoint(touchPoint.x, touchPoint.y, touchPoint.pressure)
+                    mainHandler.post { callback?.onEndErasing(point) }
                 }
             }
 
-            // Create TouchHelper following the official pattern
+            // Create TouchHelper
             val helper = com.onyx.android.sdk.pen.TouchHelper.create(this, rawCallback)
 
-            // Configure stroke appearance (for SDK rendering if it happens)
+            // Configure stroke appearance - use BLUE to confirm SDK rendering
             helper.setStrokeWidth(3.0f)
             helper.setStrokeStyle(com.onyx.android.sdk.pen.TouchHelper.STROKE_STYLE_PENCIL)
-            helper.setStrokeColor(Color.BLACK)
+            helper.setStrokeColor(Color.BLUE)
 
-            // Set the drawing area BEFORE opening raw drawing
+            // Set the drawing area
             val limitRect = Rect(0, 0, width, height)
             helper.setLimitRect(limitRect, emptyList())
             android.util.Log.d("OnyxDrawingSurface", "Set limit rect: $limitRect")
 
+            // CREATIVE APPROACH: Try to disable raw input reader and use standard Android events
+            // This might let us use TouchHelper for rendering without needing /dev/input access
+            try {
+                val setRawInputMethod = helper.javaClass.getMethod("setRawInputReaderEnable", Boolean::class.javaPrimitiveType)
+                setRawInputMethod.invoke(helper, false)
+                android.util.Log.d("OnyxDrawingSurface", "Disabled raw input reader - using Android events")
+            } catch (e: Exception) {
+                android.util.Log.w("OnyxDrawingSurface", "Could not disable raw input reader: ${e.message}")
+            }
+
             // Open raw drawing mode
             helper.openRawDrawing()
 
-            // CRITICAL: setRawDrawingRenderEnabled(false) enables DIRECT e-ink hardware rendering
-            // This is counterintuitive but documented in Onyx SDK:
-            // - false = Direct e-ink rendering (LOWEST latency, hardware accelerated)
-            // - true = SDK software rendering (higher latency)
+            // Enable SDK rendering
             try {
-                helper.setRawDrawingRenderEnabled(false)
+                helper.setRawDrawingRenderEnabled(true)
+                android.util.Log.d("OnyxDrawingSurface", "setRawDrawingRenderEnabled(true) - SDK will render strokes")
             } catch (e: Exception) {
-                // Fallback if method not available
+                android.util.Log.e("OnyxDrawingSurface", "setRawDrawingRenderEnabled failed", e)
             }
 
             // Enable raw drawing input
@@ -215,6 +209,30 @@ class OnyxDrawingSurfaceView @JvmOverloads constructor(
             android.util.Log.d("OnyxDrawingSurface", "TouchHelper initialized successfully")
         } catch (e: Exception) {
             android.util.Log.e("OnyxDrawingSurface", "Failed to initialize TouchHelper", e)
+        }
+    }
+
+    /**
+     * Feed a standard Android MotionEvent to TouchHelper.
+     * This is our creative workaround - we handle input ourselves and ask SDK to render.
+     */
+    fun feedMotionEvent(event: MotionEvent): Boolean {
+        val helper = touchHelper ?: return false
+
+        try {
+            // Try to call onTouchEvent on TouchHelper
+            val onTouchMethod = helper.javaClass.getMethod("onTouchEvent", MotionEvent::class.java)
+            return onTouchMethod.invoke(helper, event) as? Boolean ?: false
+        } catch (e: NoSuchMethodException) {
+            // Try alternative method name
+            try {
+                val dispatchMethod = helper.javaClass.getMethod("dispatchTouchEvent", MotionEvent::class.java)
+                return dispatchMethod.invoke(helper, event) as? Boolean ?: false
+            } catch (e2: Exception) {
+                return false
+            }
+        } catch (e: Exception) {
+            return false
         }
     }
 
@@ -241,10 +259,10 @@ class OnyxDrawingSurfaceView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: MotionEvent?): Boolean {
-        // Let TouchHelper handle stylus events
-        // Return true for stylus to indicate we're handling it
-        // Return false for finger to let it pass through to Compose for panning
+        // Only consume stylus events if TouchHelper is properly initialized and working
+        // Otherwise let events pass through to Compose for fallback handling
         if (event == null) return false
+        if (touchHelper == null || !isInitialized) return false
 
         val toolType = event.getToolType(0)
         return toolType == MotionEvent.TOOL_TYPE_STYLUS || toolType == MotionEvent.TOOL_TYPE_ERASER
@@ -261,12 +279,14 @@ class OnyxDrawingSurfaceView @JvmOverloads constructor(
 }
 
 /**
- * Compose wrapper for the Onyx drawing surface.
+ * Compose wrapper using AndroidView with a SurfaceView for Onyx SDK.
+ * The SDK requires a SurfaceView to receive pen input and render strokes.
  */
 @Composable
 fun OnyxDrawingSurface(
     viewModel: CanvasViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isVisible: Boolean = true
 ) {
     // Check if Onyx SDK is available
     val isOnyxDevice = remember {
@@ -275,89 +295,39 @@ fun OnyxDrawingSurface(
             val manufacturer = android.os.Build.MANUFACTURER?.lowercase() ?: ""
             val brand = android.os.Build.BRAND?.lowercase() ?: ""
             val isOnyx = manufacturer.contains("onyx") || brand.contains("onyx") || brand.contains("boox")
-            android.util.Log.d("OnyxDrawingSurface", "isOnyxDevice: $isOnyx (manufacturer=$manufacturer, brand=$brand)")
+            android.util.Log.d("OnyxDrawingSurface", "isOnyxDevice=$isOnyx (manufacturer=$manufacturer, brand=$brand)")
             isOnyx
         } catch (e: ClassNotFoundException) {
-            android.util.Log.d("OnyxDrawingSurface", "Onyx SDK not available")
+            android.util.Log.d("OnyxDrawingSurface", "Onyx SDK TouchHelper class NOT found")
             false
         }
     }
 
-    if (!isOnyxDevice) {
+    if (!isOnyxDevice || !isVisible) {
         return
     }
 
-    val activeMode = viewModel.activeMode.value
-    var surfaceView by remember { mutableStateOf<OnyxDrawingSurfaceView?>(null) }
-
-    // Update stroke color when mode changes
-    LaunchedEffect(activeMode, surfaceView) {
-        surfaceView?.let { view ->
-            val color = when (activeMode) {
-                ToolMode.MAGIC_INK -> 0xFF4CAF50.toInt()
-                else -> 0xFF000000.toInt()
-            }
-            view.setStrokeColor(color)
-        }
-    }
-
+    // Use AndroidView to embed our SurfaceView
     AndroidView(
+        modifier = modifier,
         factory = { context ->
-            OnyxDrawingSurfaceView(context).also { view ->
-                surfaceView = view
+            OnyxDrawingSurfaceView(context).apply {
+                setCallback(object : OnyxDrawingSurfaceView.Callback {
+                    override fun onStrokeComplete(points: List<PathPoint>) {
+                        if (points.size >= 2) {
+                            val scale = viewModel.canvasScale.value
+                            val offsetX = viewModel.canvasOffsetX.value
+                            val offsetY = viewModel.canvasOffsetY.value
+                            val mode = viewModel.activeMode.value
 
-                view.setCallback(object : OnyxDrawingSurfaceView.Callback {
-                    override fun onBeginDrawing(point: PathPoint) {
-                        val mode = viewModel.activeMode.value
-                        val scale = viewModel.canvasScale.value
-                        val offsetX = viewModel.canvasOffsetX.value
-                        val offsetY = viewModel.canvasOffsetY.value
-
-                        val canvasX = (point.x - offsetX) / scale
-                        val canvasY = (point.y - offsetY) / scale
-
-                        when (mode) {
-                            ToolMode.PERMANENT_INK, ToolMode.MAGIC_INK -> {
-                                viewModel.startPath(canvasX, canvasY, point.pressure)
+                            val canvasPoints = points.map { p ->
+                                PathPoint(
+                                    (p.x - offsetX) / scale,
+                                    (p.y - offsetY) / scale,
+                                    p.pressure
+                                )
                             }
-                            ToolMode.ERASER -> {
-                                viewModel.startErase()
-                                viewModel.erasePath(canvasX, canvasY)
-                            }
-                            else -> {}
-                        }
-                    }
-
-                    override fun onDrawingMove(point: PathPoint) {
-                        val mode = viewModel.activeMode.value
-                        val scale = viewModel.canvasScale.value
-                        val offsetX = viewModel.canvasOffsetX.value
-                        val offsetY = viewModel.canvasOffsetY.value
-
-                        val canvasX = (point.x - offsetX) / scale
-                        val canvasY = (point.y - offsetY) / scale
-
-                        when (mode) {
-                            ToolMode.PERMANENT_INK, ToolMode.MAGIC_INK -> {
-                                viewModel.addToPath(canvasX, canvasY, point.pressure)
-                            }
-                            ToolMode.ERASER -> {
-                                viewModel.erasePath(canvasX, canvasY)
-                            }
-                            else -> {}
-                        }
-                    }
-
-                    override fun onEndDrawing(point: PathPoint) {
-                        val mode = viewModel.activeMode.value
-                        when (mode) {
-                            ToolMode.PERMANENT_INK, ToolMode.MAGIC_INK -> {
-                                viewModel.endPath()
-                            }
-                            ToolMode.ERASER -> {
-                                viewModel.endErase()
-                            }
-                            else -> {}
+                            viewModel.addCompleteStroke(canvasPoints, mode)
                         }
                     }
 
@@ -365,23 +335,15 @@ fun OnyxDrawingSurface(
                         val scale = viewModel.canvasScale.value
                         val offsetX = viewModel.canvasOffsetX.value
                         val offsetY = viewModel.canvasOffsetY.value
-
-                        val canvasX = (point.x - offsetX) / scale
-                        val canvasY = (point.y - offsetY) / scale
-
                         viewModel.startErase()
-                        viewModel.erasePath(canvasX, canvasY)
+                        viewModel.erasePath((point.x - offsetX) / scale, (point.y - offsetY) / scale)
                     }
 
                     override fun onErasingMove(point: PathPoint) {
                         val scale = viewModel.canvasScale.value
                         val offsetX = viewModel.canvasOffsetX.value
                         val offsetY = viewModel.canvasOffsetY.value
-
-                        val canvasX = (point.x - offsetX) / scale
-                        val canvasY = (point.y - offsetY) / scale
-
-                        viewModel.erasePath(canvasX, canvasY)
+                        viewModel.erasePath((point.x - offsetX) / scale, (point.y - offsetY) / scale)
                     }
 
                     override fun onEndErasing(point: PathPoint) {
@@ -389,13 +351,6 @@ fun OnyxDrawingSurface(
                     }
                 })
             }
-        },
-        modifier = modifier
-    )
-
-    DisposableEffect(Unit) {
-        onDispose {
-            // Cleanup is handled in onDetachedFromWindow
         }
-    }
+    )
 }

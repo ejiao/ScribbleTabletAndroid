@@ -40,6 +40,14 @@ android {
     composeOptions {
         kotlinCompilerExtensionVersion = "1.4.8"
     }
+    packagingOptions {
+        // Resolve duplicate native library conflicts from Onyx SDK and other dependencies
+        pickFirst("lib/arm64-v8a/libc++_shared.so")
+        pickFirst("lib/armeabi-v7a/libc++_shared.so")
+        pickFirst("lib/x86/libc++_shared.so")
+        pickFirst("lib/x86_64/libc++_shared.so")
+        pickFirst("**/libc++_shared.so")
+    }
 }
 
 dependencies {
@@ -74,8 +82,14 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
 
-    // Onyx SDK for e-ink pen drawing (optional - only works on Onyx devices)
-    compileOnly("com.onyx.android.sdk:onyxsdk-pen:1.4.11")
+    // Onyx SDK for e-ink pen drawing (only used on Onyx/BOOX devices)
+    implementation("com.onyx.android.sdk:onyxsdk-device:1.2.16") {
+        exclude(group = "com.android.support")
+    }
+    implementation("com.onyx.android.sdk:onyxsdk-pen:1.4.11") {
+        // Exclude old support library to avoid conflicts with AndroidX
+        exclude(group = "com.android.support")
+    }
 
     debugImplementation(libs.androidx.ui.tooling)
 }

@@ -13,6 +13,9 @@ import com.commonknowledge.scribbletablet.viewmodel.CanvasViewModel
 /**
  * Overlay that renders drawing paths above cards.
  * This is a visual-only layer - touch handling is done by DrawingCanvas.
+ *
+ * On Onyx devices, the SDK renders strokes directly to e-ink, so we skip
+ * rendering currentPath here to avoid redundant work and potential flicker.
  */
 @Composable
 fun DrawingOverlay(
@@ -24,9 +27,13 @@ fun DrawingOverlay(
     val offsetY = viewModel.canvasOffsetY.value
 
     // Read state values at composable level to trigger recomposition
-    val currentPath = viewModel.currentPath.value
     val permanentPaths = viewModel.permanentPaths
     val magicPaths = viewModel.magicPaths
+
+    // Only read currentPath if realtime callback is NOT being used
+    // (RealtimeStrokeView handles the current stroke with lower latency)
+    val hasRealtimeCallback = viewModel.realtimeStrokeCallback != null
+    val currentPath = if (!hasRealtimeCallback) viewModel.currentPath.value else null
 
     Canvas(modifier = modifier.fillMaxSize()) {
         withTransform({
@@ -43,9 +50,9 @@ fun DrawingOverlay(
                 drawStrokePathFast(path)
             }
 
-            // Draw current path with predictive extension for lower perceived latency
+            // Draw current path only if RealtimeStrokeView is not handling it
             currentPath?.let { path ->
-                drawStrokePathFast(path, predictive = true)
+                drawStrokePathFast(path, predictive = false)
             }
         }
     }
