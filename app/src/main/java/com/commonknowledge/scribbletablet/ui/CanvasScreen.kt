@@ -1,6 +1,11 @@
 package com.commonknowledge.scribbletablet.ui
 
 import android.graphics.Bitmap
+import android.graphics.RectF
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,16 +27,24 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.commonknowledge.scribbletablet.data.model.CanvasCard
+import com.commonknowledge.scribbletablet.data.model.CardType
 import com.commonknowledge.scribbletablet.data.model.DrawingPath
 import com.commonknowledge.scribbletablet.data.model.ToolMode
 import com.commonknowledge.scribbletablet.ui.canvas.DrawingCanvas
+import com.commonknowledge.scribbletablet.ui.canvas.DrawingOverlay
+import com.commonknowledge.scribbletablet.ui.canvas.GenerationRippleView
+import com.commonknowledge.scribbletablet.ui.canvas.OnyxDrawingSurface
 import com.commonknowledge.scribbletablet.ui.cards.CardView
+import com.commonknowledge.scribbletablet.ui.cards.ExpandedCardOverlay
+import com.commonknowledge.scribbletablet.ui.components.AudioRecorderView
 import com.commonknowledge.scribbletablet.ui.toolbar.CanvasToolbar
 import com.commonknowledge.scribbletablet.ui.workspace.WorkspaceMenuView
 import com.commonknowledge.scribbletablet.viewmodel.CanvasViewModel
+import java.io.File
 
 @Composable
 fun CanvasScreen(
@@ -48,6 +61,7 @@ fun CanvasScreen(
     val activeMode = viewModel.activeMode.value
     val selectedCardId = viewModel.selectedCardId.value
     val isInMoveMode = activeMode == ToolMode.MOVE
+    val isGenerating = viewModel.isGenerating.value
 
     // Canvas transform state
     val canvasScale = viewModel.canvasScale.value
@@ -61,6 +75,34 @@ fun CanvasScreen(
     val canvasList = viewModel.canvasList
     val thumbnails = viewModel.thumbnails.value
 
+    // Audio recorder state
+    var showAudioRecorder by remember { mutableStateOf(false) }
+
+    // Photo picker launcher
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        uri?.let {
+            // Add image card at center of viewport
+            val centerX = viewModel.viewportRect.value.centerX()
+            val centerY = viewModel.viewportRect.value.centerY()
+            val cardWidth = 300f
+            val cardHeight = 200f
+
+            val card = CanvasCard(
+                type = CardType.IMAGE,
+                rect = RectF(
+                    centerX - cardWidth / 2,
+                    centerY - cardHeight / 2,
+                    centerX + cardWidth / 2,
+                    centerY + cardHeight / 2
+                ),
+                imageUrl = uri.toString()
+            )
+            viewModel.addCard(card)
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         // Drawing canvas
         DrawingCanvas(
@@ -68,41 +110,66 @@ fun CanvasScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Cards overlay - render non-selected cards first, then selected card on top
-        viewModel.cards.filter { it.id != selectedCardId }.forEach { card ->
-            CardView(
-                card = card,
-                isInMoveMode = isInMoveMode,
-                onDelete = { viewModel.removeCard(card.id) },
-                onSelect = { viewModel.selectCard(card.id) },
-                isSelected = false,
-                canvasScale = canvasScale,
-                canvasOffsetX = canvasOffsetX,
-                canvasOffsetY = canvasOffsetY,
-                onPlayExpanded = { expandedCard, snapshot, magicPaths ->
-                    viewModel.playExpandedCard(expandedCard, snapshot, magicPaths)
-                }
-            )
-        }
+        // Generation ripple animation overlay
+        GenerationRippleView(
+            isVisible = isGenerating,
+            modifier = Modifier.fillMaxSize()
+        )
 
-        // Selected card rendered last (on top) with higher z-index
-        selectedCardId?.let { selectedId ->
-            viewModel.cards.find { it.id == selectedId }?.let { card ->
+        // Cards overlay - use key() to maintain card identity across recompositions
+        viewModel.cards.forEach { card ->
+            val isSelected = card.id == selectedCardId
+            key(card.id) {
                 CardView(
                     card = card,
                     isInMoveMode = isInMoveMode,
                     onDelete = { viewModel.removeCard(card.id) },
                     onSelect = { viewModel.selectCard(card.id) },
-                    isSelected = true,
+                    isSelected = isSelected,
                     canvasScale = canvasScale,
                     canvasOffsetX = canvasOffsetX,
                     canvasOffsetY = canvasOffsetY,
                     onPlayExpanded = { expandedCard, snapshot, magicPaths ->
                         viewModel.playExpandedCard(expandedCard, snapshot, magicPaths)
                     },
-                    modifier = Modifier.zIndex(100f)
+                    onExpand = { viewModel.expandCard(card.id) },
+                    onPositionChanged = { newX, newY ->
+                        viewModel.updateCardPosition(card.id, newX, newY)
+                    },
+                    modifier = if (isSelected) Modifier.zIndex(100f) else Modifier
                 )
             }
+        }
+
+        // Drawing overlay - renders strokes above cards
+        DrawingOverlay(
+            viewModel = viewModel,
+            modifier = Modifier.fillMaxSize().zIndex(150f)
+        )
+
+        // Onyx drawing surface - transparent overlay for fast e-ink pen rendering
+        // Only rendered on Onyx devices, handles pen input directly via SDK
+        OnyxDrawingSurface(
+            viewModel = viewModel,
+            modifier = Modifier.fillMaxSize().zIndex(160f)
+        )
+
+        // Expanded card overlay - rendered below toolbar (zIndex 190 < toolbar 200)
+        val expandedCardId = viewModel.expandedCardId.value
+        val expandedCard = expandedCardId?.let { id -> viewModel.cards.find { it.id == id } }
+        if (expandedCard != null) {
+            ExpandedCardOverlay(
+                card = expandedCard,
+                onDismiss = { viewModel.collapseExpandedCard() },
+                onDelete = {
+                    viewModel.removeCard(expandedCard.id)
+                    viewModel.collapseExpandedCard()
+                },
+                isGenerating = isGenerating,
+                magicPaths = viewModel.expandedCardMagicPaths,
+                onAddMagicPath = { viewModel.addExpandedCardMagicPath(it) },
+                modifier = Modifier.zIndex(190f)
+            )
         }
 
         // Top bar
@@ -114,19 +181,21 @@ fun CanvasScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left: Workspace menu button with canvas title
-            WorkspaceMenuButton(
-                title = currentCanvasTitle,
-                onClick = { viewModel.toggleWorkspaceMenu() }
-            )
-
-            // Right: New canvas button and fuel pill
+            // Left: Workspace menu button and new canvas button
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Workspace menu button (hidden when sidebar is open)
+                if (!showingWorkspaceMenu) {
+                    WorkspaceMenuButton(
+                        title = currentCanvasTitle,
+                        onClick = { viewModel.toggleWorkspaceMenu() }
+                    )
+                }
+
                 // New canvas button
-                IconButton(
+                Surface(
                     onClick = { viewModel.createNewCanvas() },
                     modifier = Modifier
                         .size(44.dp)
@@ -136,21 +205,27 @@ fun CanvasScreen(
                             ambientColor = Color.Black.copy(alpha = 0.08f),
                             spotColor = Color.Black.copy(alpha = 0.12f)
                         )
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.95f))
-                        .border(1.dp, Color.Black.copy(alpha = 0.1f), CircleShape)
+                        .border(1.dp, Color.Black.copy(alpha = 0.1f), CircleShape),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                    tonalElevation = 4.dp
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.NoteAdd,
-                        contentDescription = "New Canvas",
-                        tint = Color.DarkGray,
-                        modifier = Modifier.size(22.dp)
-                    )
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.NoteAdd,
+                            contentDescription = "New Canvas",
+                            tint = Color.DarkGray,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
-
-                // Fuel pill (placeholder for now)
-                FuelPill(fuelValue = "57.1")
             }
+
+            // Right: Fuel pill
+            FuelPill(fuelValue = "57.1")
         }
 
         // Toolbar at bottom
@@ -160,7 +235,45 @@ fun CanvasScreen(
                 .align(Alignment.BottomCenter)
                 .zIndex(200f)
         ) {
-            CanvasToolbar(viewModel = viewModel)
+            CanvasToolbar(
+                viewModel = viewModel,
+                onOpenPhotoPicker = {
+                    photoPickerLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                    )
+                },
+                onOpenAudioRecorder = { showAudioRecorder = true }
+            )
+        }
+
+        // Audio recorder dialog
+        if (showAudioRecorder) {
+            Dialog(onDismissRequest = { showAudioRecorder = false }) {
+                AudioRecorderView(
+                    onDismiss = { showAudioRecorder = false },
+                    onRecordingComplete = { file, duration ->
+                        // Add audio card at center of viewport
+                        val centerX = viewModel.viewportRect.value.centerX()
+                        val centerY = viewModel.viewportRect.value.centerY()
+                        val cardWidth = 200f
+                        val cardHeight = 100f
+
+                        val card = CanvasCard(
+                            type = CardType.AUDIO,
+                            rect = RectF(
+                                centerX - cardWidth / 2,
+                                centerY - cardHeight / 2,
+                                centerX + cardWidth / 2,
+                                centerY + cardHeight / 2
+                            ),
+                            audioUrl = file.toURI().toString(),
+                            audioDuration = duration
+                        )
+                        viewModel.addCard(card)
+                        showAudioRecorder = false
+                    }
+                )
+            }
         }
 
         // Workspace side menu
@@ -204,6 +317,7 @@ private fun WorkspaceMenuButton(
     Surface(
         onClick = onClick,
         modifier = Modifier
+            .height(44.dp)
             .shadow(
                 elevation = 12.dp,
                 shape = RoundedCornerShape(percent = 50),
@@ -216,7 +330,9 @@ private fun WorkspaceMenuButton(
         tonalElevation = 4.dp
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -246,6 +362,7 @@ private fun FuelPill(
 ) {
     Surface(
         modifier = Modifier
+            .height(44.dp)
             .shadow(
                 elevation = 12.dp,
                 shape = RoundedCornerShape(percent = 50),
@@ -258,7 +375,9 @@ private fun FuelPill(
         tonalElevation = 4.dp
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {

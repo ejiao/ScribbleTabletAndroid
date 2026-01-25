@@ -74,5 +74,8 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
 
+    // Onyx SDK for e-ink pen drawing (optional - only works on Onyx devices)
+    compileOnly("com.onyx.android.sdk:onyxsdk-pen:1.4.11")
+
     debugImplementation(libs.androidx.ui.tooling)
 }

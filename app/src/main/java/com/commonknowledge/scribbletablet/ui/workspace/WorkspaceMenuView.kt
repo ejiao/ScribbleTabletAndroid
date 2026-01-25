@@ -35,6 +35,9 @@ import androidx.compose.ui.unit.sp
 import com.commonknowledge.scribbletablet.data.model.CanvasMetadata
 import java.util.UUID
 
+// Orange color matching iOS implementation
+private val ActiveCanvasColor = Color(0xFFFF9800)
+
 @Composable
 fun WorkspaceMenuView(
     isOpen: Boolean,
@@ -57,7 +60,7 @@ fun WorkspaceMenuView(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.3f))
+                .background(Color.Black.copy(alpha = 0.4f))
                 .clickable(onClick = onDismiss)
         )
     }
@@ -77,71 +80,69 @@ fun WorkspaceMenuView(
         Box(
             modifier = modifier
                 .fillMaxHeight()
-                .width(320.dp)
+                .width(280.dp) // Match iOS width
                 .shadow(16.dp)
                 .background(Color.White)
                 .clickable(enabled = false, onClick = {}) // Prevent clicks passing through
         ) {
-            Column(
-                modifier = Modifier.fillMaxSize()
+            // Canvas list with New Canvas button at top (matching iOS)
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Header with new canvas button
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Canvases",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.Black
-                    )
-
-                    IconButton(
+                // New Canvas button at top (matching iOS style)
+                item {
+                    Surface(
                         onClick = {
                             onNewCanvas()
                             onDismiss()
                         },
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(Color.Black, CircleShape)
+                        shape = RoundedCornerShape(percent = 50),
+                        color = Color.Black
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.Add,
-                            contentDescription = "New Canvas",
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Add,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "New Canvas",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
+                            )
+                        }
                     }
                 }
 
-                Divider(color = Color.LightGray.copy(alpha = 0.5f))
-
-                // Canvas list
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 8.dp)
-                ) {
-                    items(canvases, key = { it.id }) { canvas ->
-                        CanvasListItem(
-                            canvas = canvas,
-                            isActive = canvas.id == activeCanvasId?.toString(),
-                            thumbnail = thumbnails[canvas.id],
-                            onClick = {
-                                onCanvasSelect(UUID.fromString(canvas.id))
-                                onDismiss()
-                            },
-                            onDelete = {
-                                onCanvasDelete(UUID.fromString(canvas.id))
-                            },
-                            onRename = { newTitle ->
-                                onCanvasRename(UUID.fromString(canvas.id), newTitle)
-                            }
-                        )
-                    }
+                // Canvas items
+                items(canvases, key = { it.id }) { canvas ->
+                    CanvasListItem(
+                        canvas = canvas,
+                        isActive = canvas.id == activeCanvasId?.toString(),
+                        thumbnail = thumbnails[canvas.id],
+                        canDelete = canvases.size > 1,
+                        onClick = {
+                            onCanvasSelect(UUID.fromString(canvas.id))
+                            onDismiss()
+                        },
+                        onDelete = {
+                            onCanvasDelete(UUID.fromString(canvas.id))
+                        },
+                        onRename = { newTitle ->
+                            onCanvasRename(UUID.fromString(canvas.id), newTitle)
+                        }
+                    )
                 }
             }
         }
@@ -154,6 +155,7 @@ private fun CanvasListItem(
     canvas: CanvasMetadata,
     isActive: Boolean,
     thumbnail: Bitmap?,
+    canDelete: Boolean,
     onClick: () -> Unit,
     onDelete: () -> Unit,
     onRename: (String) -> Unit
@@ -199,117 +201,119 @@ private fun CanvasListItem(
         )
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .background(
-                if (isActive) Color(0xFF2196F3).copy(alpha = 0.1f) else Color.Transparent
-            )
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+    // Card container with optional active highlight (matching iOS orange)
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp),
+        color = if (isActive) ActiveCanvasColor.copy(alpha = 0.3f) else Color.Transparent
     ) {
-        // Thumbnail
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(140.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color.LightGray.copy(alpha = 0.3f))
-                .then(
-                    if (isActive) {
-                        Modifier.border(2.dp, Color(0xFF2196F3), RoundedCornerShape(8.dp))
-                    } else {
-                        Modifier.border(1.dp, Color.LightGray.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                    }
-                )
+                .padding(8.dp)
         ) {
-            if (thumbnail != null) {
-                Image(
-                    bitmap = thumbnail.asImageBitmap(),
-                    contentDescription = canvas.title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                // Placeholder
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Image,
-                        contentDescription = null,
-                        tint = Color.Gray,
-                        modifier = Modifier.size(48.dp)
-                    )
-                }
-            }
-
-            // Menu button (top right)
+            // Thumbnail
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(8.dp)
+                    .fillMaxWidth()
+                    .height(140.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.LightGray.copy(alpha = 0.1f))
+                    .border(1.dp, Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
             ) {
-                IconButton(
-                    onClick = { showMenu = true },
-                    modifier = Modifier
-                        .size(32.dp)
-                        .background(Color.White.copy(alpha = 0.9f), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.MoreVert,
-                        contentDescription = "Options",
-                        tint = Color.DarkGray,
-                        modifier = Modifier.size(18.dp)
+                if (thumbnail != null) {
+                    Image(
+                        bitmap = thumbnail.asImageBitmap(),
+                        contentDescription = canvas.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
                     )
+                } else {
+                    // Placeholder matching iOS
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Description,
+                            contentDescription = null,
+                            tint = Color.Gray.copy(alpha = 0.5f),
+                            modifier = Modifier.size(48.dp)
+                        )
+                    }
                 }
 
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false }
+                // Menu button (top right) - matching iOS ellipsis style
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("Rename") },
-                        onClick = {
-                            showMenu = false
-                            showRenameDialog = true
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Outlined.Edit, contentDescription = null)
+                    IconButton(
+                        onClick = { showMenu = true },
+                        modifier = Modifier
+                            .size(28.dp)
+                            .shadow(2.dp, CircleShape)
+                            .background(Color.White, CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.MoreVert,
+                            contentDescription = "Options",
+                            tint = Color.DarkGray,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Rename") },
+                            onClick = {
+                                showMenu = false
+                                showRenameDialog = true
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Outlined.Edit, contentDescription = null)
+                            }
+                        )
+                        if (canDelete) {
+                            DropdownMenuItem(
+                                text = { Text("Delete", color = Color.Red) },
+                                onClick = {
+                                    showMenu = false
+                                    showDeleteDialog = true
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Outlined.Delete, contentDescription = null, tint = Color.Red)
+                                }
+                            )
                         }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Delete", color = Color.Red) },
-                        onClick = {
-                            showMenu = false
-                            showDeleteDialog = true
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Outlined.Delete, contentDescription = null, tint = Color.Red)
-                        }
-                    )
+                    }
                 }
             }
+
+            // Title and date underneath (matching iOS layout)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = canvas.title,
+                fontSize = 14.sp,
+                fontWeight = if (isActive) FontWeight.Medium else FontWeight.Normal,
+                color = Color.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            Text(
+                text = formatRelativeTime(canvas.modifiedAt),
+                fontSize = 12.sp,
+                color = Color.Gray,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
         }
-
-        // Title and date
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = canvas.title,
-            fontSize = 14.sp,
-            fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (isActive) Color(0xFF2196F3) else Color.Black,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-
-        Text(
-            text = formatRelativeTime(canvas.modifiedAt),
-            fontSize = 12.sp,
-            color = Color.Gray
-        )
     }
 }
 

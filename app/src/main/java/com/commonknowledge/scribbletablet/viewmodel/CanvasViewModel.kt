@@ -66,6 +66,31 @@ class CanvasViewModel : ViewModel() {
     var isGenerating = mutableStateOf(false)
     var errorMessage = mutableStateOf<String?>(null)
     var selectedCardId = mutableStateOf<UUID?>(null)
+    var isCardExpanded = mutableStateOf(false)
+    var expandedCardId = mutableStateOf<UUID?>(null)
+
+    // Magic paths drawn on expanded card (separate from main canvas magic paths)
+    val expandedCardMagicPaths = mutableStateListOf<DrawingPath>()
+
+    fun expandCard(cardId: UUID) {
+        expandedCardId.value = cardId
+        isCardExpanded.value = true
+        expandedCardMagicPaths.clear() // Clear any previous expanded card paths
+    }
+
+    fun collapseExpandedCard() {
+        expandedCardId.value = null
+        isCardExpanded.value = false
+        expandedCardMagicPaths.clear()
+    }
+
+    fun addExpandedCardMagicPath(path: DrawingPath) {
+        expandedCardMagicPaths.add(path)
+    }
+
+    fun clearExpandedCardMagicPaths() {
+        expandedCardMagicPaths.clear()
+    }
 
     // Canvas viewport
     var viewportRect = mutableStateOf(RectF(0f, 0f, 1000f, 1000f))
@@ -197,9 +222,16 @@ class CanvasViewModel : ViewModel() {
 
     fun addToPath(x: Float, y: Float, pressure: Float = 1f) {
         currentPath.value?.let { path ->
-            path.points.add(PathPoint(x, y, pressure))
-            // Create a new reference to trigger recomposition
-            currentPath.value = path.copy()
+            // Create a completely new DrawingPath with new points list to ensure
+            // Compose detects the change (data class equals uses structural equality)
+            val newPoints = path.points.toMutableList()
+            newPoints.add(PathPoint(x, y, pressure))
+            currentPath.value = DrawingPath(
+                points = newPoints,
+                isMagicInk = path.isMagicInk,
+                strokeWidth = path.strokeWidth,
+                color = path.color
+            )
         }
     }
 
@@ -280,7 +312,11 @@ class CanvasViewModel : ViewModel() {
     fun play() {
         if (isGenerating.value) return
 
-        if (magicPaths.isEmpty()) {
+        // Check for magic paths - either on main canvas or expanded card
+        val hasExpandedCardPaths = isCardExpanded.value && expandedCardMagicPaths.isNotEmpty()
+        val hasMainCanvasPaths = magicPaths.isNotEmpty()
+
+        if (!hasExpandedCardPaths && !hasMainCanvasPaths) {
             errorMessage.value = "Draw something with magic ink first"
             return
         }
@@ -309,11 +345,17 @@ class CanvasViewModel : ViewModel() {
                     snapshot = snapshot,
                     viewportSize = viewportSize,
                     assets = assets,
-                    editMode = false
+                    editMode = isCardExpanded.value // Use edit mode when card is expanded
                 )
 
                 processActions(response.actions, response.generationId)
-                clearMagicInk()
+
+                // Clear the appropriate magic paths
+                if (isCardExpanded.value) {
+                    expandedCardMagicPaths.clear()
+                } else {
+                    clearMagicInk()
+                }
 
             } catch (e: Exception) {
                 Log.e("CanvasViewModel", "Generation error: ${e.message}", e)
@@ -486,37 +528,109 @@ class CanvasViewModel : ViewModel() {
                     }
                 }
 
+                ActionType.PLACE_AUDIO -> {
+                    val box = action.box ?: continue
+                    val screenLeft = box.x * visibleRect.width()
+                    val screenTop = box.y * visibleRect.height()
+                    val screenRight = (box.x + box.w) * visibleRect.width()
+                    val screenBottom = (box.y + box.h) * visibleRect.height()
+
+                    val rect = RectF(
+                        ((screenLeft - offsetX) / scale).toFloat(),
+                        ((screenTop - offsetY) / scale).toFloat(),
+                        ((screenRight - offsetX) / scale).toFloat(),
+                        ((screenBottom - offsetY) / scale).toFloat()
+                    )
+
+                    action.audioUrl?.let { audioUrl ->
+                        val card = CanvasCard(
+                            type = CardType.AUDIO,
+                            rect = rect,
+                            audioUrl = audioUrl,
+                            generationId = genId
+                        )
+                        cards.add(card)
+                        addedCards.add(card)
+                    }
+                }
+
                 ActionType.MODIFY_ASSET -> {
                     val targetId = action.targetAssetId ?: continue
                     val cardIndex = cards.indexOfFirst { it.assetId == targetId }
                     if (cardIndex >= 0) {
                         val card = cards[cardIndex]
-                        when {
-                            action.html != null -> {
-                                cards[cardIndex] = card.copy(
-                                    type = CardType.WEB,
-                                    htmlContent = action.html,
-                                    text = null,
-                                    imageUrl = null
-                                )
-                            }
-                            action.text != null -> {
-                                cards[cardIndex] = card.copy(
-                                    type = CardType.TEXT,
-                                    text = action.text,
-                                    htmlContent = null,
-                                    imageUrl = null
-                                )
-                            }
+                        Log.d("Cards", "Modifying asset $targetId")
+
+                        // Determine new content type and update accordingly
+                        // Only ONE of these will be set (mutually exclusive)
+                        val updatedCard = when {
                             action.imageUrl != null -> {
-                                cards[cardIndex] = card.copy(
+                                card.copy(
                                     type = CardType.IMAGE,
                                     imageUrl = action.imageUrl,
                                     text = null,
-                                    htmlContent = null
+                                    htmlContent = null,
+                                    videoUrl = null,
+                                    audioUrl = null,
+                                    sourceAssetIds = action.sourceAssetIds ?: card.sourceAssetIds,
+                                    transformType = action.transformType ?: card.transformType
                                 )
                             }
+                            action.videoUrl != null -> {
+                                card.copy(
+                                    type = CardType.VIDEO,
+                                    videoUrl = action.videoUrl,
+                                    imageUrl = null,
+                                    text = null,
+                                    htmlContent = null,
+                                    audioUrl = null,
+                                    sourceAssetIds = action.sourceAssetIds ?: card.sourceAssetIds,
+                                    transformType = action.transformType ?: card.transformType
+                                )
+                            }
+                            action.audioUrl != null -> {
+                                card.copy(
+                                    type = CardType.AUDIO,
+                                    audioUrl = action.audioUrl,
+                                    imageUrl = null,
+                                    text = null,
+                                    htmlContent = null,
+                                    videoUrl = null,
+                                    sourceAssetIds = action.sourceAssetIds ?: card.sourceAssetIds,
+                                    transformType = action.transformType ?: card.transformType
+                                )
+                            }
+                            action.text != null -> {
+                                card.copy(
+                                    type = CardType.TEXT,
+                                    text = action.text,
+                                    htmlContent = null,
+                                    imageUrl = null,
+                                    videoUrl = null,
+                                    audioUrl = null,
+                                    sourceAssetIds = action.sourceAssetIds ?: card.sourceAssetIds,
+                                    transformType = action.transformType ?: card.transformType
+                                )
+                            }
+                            action.html != null -> {
+                                card.copy(
+                                    type = CardType.WEB,
+                                    htmlContent = action.html,
+                                    text = null,
+                                    imageUrl = null,
+                                    videoUrl = null,
+                                    audioUrl = null,
+                                    sourceAssetIds = action.sourceAssetIds ?: card.sourceAssetIds,
+                                    transformType = action.transformType ?: card.transformType
+                                )
+                            }
+                            else -> card // No change if no content field set
                         }
+
+                        cards[cardIndex] = updatedCard
+                        markNeedsSave()
+                    } else {
+                        Log.w("Cards", "modify_asset: target asset $targetId not found")
                     }
                 }
 
@@ -545,6 +659,23 @@ class CanvasViewModel : ViewModel() {
             pushUndo(UndoableAction.RemoveCard(card))
             markNeedsSave()
         }
+    }
+
+    fun updateCardPosition(cardId: UUID, newX: Float, newY: Float) {
+        val cardIndex = cards.indexOfFirst { it.id == cardId }
+        if (cardIndex >= 0) {
+            val card = cards[cardIndex]
+            val width = card.rect.width()
+            val height = card.rect.height()
+            card.rect = RectF(newX, newY, newX + width, newY + height)
+            markNeedsSave()
+        }
+    }
+
+    fun addCard(card: CanvasCard) {
+        cards.add(card)
+        pushUndo(UndoableAction.AddCard(card))
+        markNeedsSave()
     }
 
     fun playExpandedCard(card: CanvasCard, snapshot: Bitmap, magicPaths: List<DrawingPath>) {
@@ -628,7 +759,7 @@ class CanvasViewModel : ViewModel() {
                         }
                     }
                 }
-                ActionType.PLACE_TEXT, ActionType.PLACE_IMAGE, ActionType.PLACE_WEB, ActionType.PLACE_VIDEO -> {
+                ActionType.PLACE_TEXT, ActionType.PLACE_IMAGE, ActionType.PLACE_WEB, ActionType.PLACE_VIDEO, ActionType.PLACE_AUDIO -> {
                     // Place new cards relative to the source card position
                     val box = action.box ?: continue
                     val rect = RectF(
@@ -671,6 +802,16 @@ class CanvasViewModel : ViewModel() {
                                     type = CardType.VIDEO,
                                     rect = rect,
                                     videoUrl = videoUrl,
+                                    generationId = genId
+                                )
+                            }
+                        }
+                        ActionType.PLACE_AUDIO -> {
+                            action.audioUrl?.let { audioUrl ->
+                                CanvasCard(
+                                    type = CardType.AUDIO,
+                                    rect = rect,
+                                    audioUrl = audioUrl,
                                     generationId = genId
                                 )
                             }

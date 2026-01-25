@@ -9,7 +9,6 @@ import android.os.Looper
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.PixelCopy
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -19,7 +18,6 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.onSizeChanged
@@ -27,13 +25,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntSize
 import android.app.Activity
-import com.commonknowledge.scribbletablet.data.model.DrawingPath
 import com.commonknowledge.scribbletablet.data.model.ToolMode
+import com.commonknowledge.scribbletablet.util.OnyxHelper
 import com.commonknowledge.scribbletablet.viewmodel.CanvasViewModel
-import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
 import kotlin.math.sqrt
-import kotlin.random.Random
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -66,17 +61,8 @@ fun DrawingCanvas(
     var lastTouchY by remember { mutableStateOf(0f) }
     var isPanning by remember { mutableStateOf(false) }
 
-    // Shimmer animation for magic ink
-    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
-    val shimmerTime by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1000f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(10000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "shimmerTime"
-    )
+    // Check if this is an Onyx device (pen input handled by OnyxDrawingSurface overlay)
+    val isOnyxDevice = remember { OnyxHelper.isOnyxDevice() }
 
     // Keep references updated
     val currentView by rememberUpdatedState(view)
@@ -186,7 +172,12 @@ fun DrawingCanvas(
 
                 // Consider it a stylus if either method detects it
                 val isStylus = isToolTypeStylus || isSourceStylus
-                val isFinger = toolType == MotionEvent.TOOL_TYPE_FINGER && !isSourceStylus
+
+                // On Onyx devices, pen input is handled by OnyxDrawingSurface overlay
+                // Let the event pass through so the overlay can handle it
+                if (isOnyxDevice && (isStylus || isStylusEraser)) {
+                    return@pointerInteropFilter false
+                }
 
                 // Transform touch coordinates to canvas coordinates
                 val touchX = (event.x - offsetX) / scale
@@ -343,14 +334,16 @@ fun DrawingCanvas(
                 }
             }
     ) {
+        // Only render the dot grid - strokes are rendered by DrawingOverlay above cards
         Canvas(modifier = Modifier.fillMaxSize()) {
             withTransform({
                 translate(offsetX, offsetY)
                 scale(scale, scale, Offset.Zero)
             }) {
-                // Draw grid (larger for infinite canvas feel)
+                // Draw dot grid (larger for infinite canvas feel)
                 val gridSize = 50f
-                val gridColor = Color.LightGray.copy(alpha = 0.3f)
+                val dotColor = Color.LightGray.copy(alpha = 0.4f)
+                val dotRadius = 2f
 
                 // Calculate visible area
                 val startX = (-offsetX / scale - 1000).toInt()
@@ -358,158 +351,21 @@ fun DrawingCanvas(
                 val startY = (-offsetY / scale - 1000).toInt()
                 val endY = ((-offsetY + size.height) / scale + 1000).toInt()
 
-                // Draw vertical grid lines
+                // Draw dots at grid intersections
                 var x = (startX / gridSize.toInt()) * gridSize.toInt()
                 while (x < endX) {
-                    drawLine(
-                        color = gridColor,
-                        start = Offset(x.toFloat(), startY.toFloat()),
-                        end = Offset(x.toFloat(), endY.toFloat()),
-                        strokeWidth = 1f / scale
-                    )
+                    var y = (startY / gridSize.toInt()) * gridSize.toInt()
+                    while (y < endY) {
+                        drawCircle(
+                            color = dotColor,
+                            radius = dotRadius,
+                            center = Offset(x.toFloat(), y.toFloat())
+                        )
+                        y += gridSize.toInt()
+                    }
                     x += gridSize.toInt()
                 }
-
-                // Draw horizontal grid lines
-                var y = (startY / gridSize.toInt()) * gridSize.toInt()
-                while (y < endY) {
-                    drawLine(
-                        color = gridColor,
-                        start = Offset(startX.toFloat(), y.toFloat()),
-                        end = Offset(endX.toFloat(), y.toFloat()),
-                        strokeWidth = 1f / scale
-                    )
-                    y += gridSize.toInt()
-                }
-
-                // Draw permanent paths
-                viewModel.permanentPaths.forEach { path ->
-                    drawPath(path, scale)
-                }
-
-                // Draw magic paths with shimmer effect
-                viewModel.magicPaths.forEach { path ->
-                    drawPath(path, scale)
-                    drawMagicInkShimmer(path, shimmerTime, scale)
-                }
-
-                // Draw current path
-                viewModel.currentPath.value?.let { path ->
-                    drawPath(path, scale)
-                    if (path.isMagicInk) {
-                        drawMagicInkShimmer(path, shimmerTime, scale)
-                    }
-                }
             }
-        }
-    }
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPath(path: DrawingPath, scale: Float = 1f) {
-    if (path.points.size < 2) return
-
-    val androidPath = Path()
-    val firstPoint = path.points.first()
-    androidPath.moveTo(firstPoint.x, firstPoint.y)
-
-    for (i in 1 until path.points.size) {
-        val point = path.points[i]
-        val prevPoint = path.points[i - 1]
-
-        // Use quadratic bezier for smoother lines
-        val midX = (prevPoint.x + point.x) / 2
-        val midY = (prevPoint.y + point.y) / 2
-
-        androidPath.quadraticBezierTo(
-            prevPoint.x,
-            prevPoint.y,
-            midX,
-            midY
-        )
-    }
-
-    // Draw the last point
-    val lastPoint = path.points.last()
-    androidPath.lineTo(lastPoint.x, lastPoint.y)
-
-    drawPath(
-        path = androidPath,
-        color = Color(path.color),
-        style = Stroke(
-            width = path.strokeWidth,
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round
-        )
-    )
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMagicInkShimmer(
-    path: DrawingPath,
-    time: Float,
-    scale: Float
-) {
-    if (path.points.size < 2) return
-
-    val random = Random(path.hashCode())
-
-    // Draw shimmer segments along the path - these are bright spots that travel along the stroke
-    val numShimmers = 8
-    val baseColor = Color(path.color)
-
-    for (shimmerIndex in 0 until numShimmers) {
-        // Each shimmer travels along the path at different speeds/offsets
-        val shimmerSeed = random.nextInt(1000)
-        val speed = 0.02f + random.nextFloat() * 0.03f
-        val shimmerPosition = ((time * speed + shimmerSeed) % 100f) / 100f
-
-        // Find the point along the path for this shimmer
-        val pointIndex = (shimmerPosition * (path.points.size - 1)).toInt()
-            .coerceIn(0, path.points.size - 1)
-
-        // Shimmer intensity varies with time
-        val phase = ((time * 0.1f + shimmerSeed) % 50f)
-        val intensity = when {
-            phase < 15f -> phase / 15f
-            phase < 35f -> 1f
-            else -> 1f - (phase - 35f) / 15f
-        }.coerceIn(0f, 1f)
-
-        // Draw highlight as a brighter segment on top of the existing stroke
-        // Use a small segment around the shimmer point
-        val segmentRadius = 3 // points before and after
-        val startIdx = maxOf(0, pointIndex - segmentRadius)
-        val endIdx = minOf(path.points.size - 1, pointIndex + segmentRadius)
-
-        if (endIdx > startIdx) {
-            val shimmerPath = Path()
-            shimmerPath.moveTo(path.points[startIdx].x, path.points[startIdx].y)
-
-            for (i in startIdx + 1..endIdx) {
-                val point = path.points[i]
-                val prevPoint = path.points[i - 1]
-                val midX = (prevPoint.x + point.x) / 2
-                val midY = (prevPoint.y + point.y) / 2
-                shimmerPath.quadraticBezierTo(prevPoint.x, prevPoint.y, midX, midY)
-            }
-            shimmerPath.lineTo(path.points[endIdx].x, path.points[endIdx].y)
-
-            // Bright highlight color (lighter green/yellow tint)
-            val highlightColor = Color(
-                red = minOf(1f, baseColor.red + 0.3f * intensity),
-                green = minOf(1f, baseColor.green + 0.2f * intensity),
-                blue = minOf(1f, baseColor.blue + 0.1f * intensity),
-                alpha = 0.6f * intensity
-            )
-
-            drawPath(
-                path = shimmerPath,
-                color = highlightColor,
-                style = Stroke(
-                    width = path.strokeWidth * 0.6f,
-                    cap = StrokeCap.Round,
-                    join = StrokeJoin.Round
-                )
-            )
         }
     }
 }

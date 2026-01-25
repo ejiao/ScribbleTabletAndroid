@@ -67,6 +67,7 @@ enum class ActionType {
     @SerialName("place_text") PLACE_TEXT,
     @SerialName("place_web") PLACE_WEB,
     @SerialName("place_video") PLACE_VIDEO,
+    @SerialName("place_audio") PLACE_AUDIO,
     @SerialName("modify_asset") MODIFY_ASSET,
     @SerialName("delete_asset") DELETE_ASSET
 }

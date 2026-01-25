@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 import java.util.UUID
 
 enum class CardType {
-    TEXT, IMAGE, WEB, VIDEO
+    TEXT, IMAGE, WEB, VIDEO, AUDIO
 }
 
 // Canvas Document for persistence
@@ -69,6 +69,8 @@ data class SerializableCard(
     val text: String? = null,
     val imageUrl: String? = null,
     val videoUrl: String? = null,
+    val audioUrl: String? = null,
+    val audioDuration: Long? = null,
     val htmlContent: String? = null,
     val generationId: String? = null,
     val assetId: String? = null
@@ -114,6 +116,8 @@ fun CanvasCard.toSerializable() = SerializableCard(
     text = text,
     imageUrl = imageUrl,
     videoUrl = videoUrl,
+    audioUrl = audioUrl,
+    audioDuration = audioDuration,
     htmlContent = htmlContent,
     generationId = generationId,
     assetId = assetId
@@ -126,6 +130,8 @@ fun SerializableCard.toCanvasCard() = CanvasCard(
     text = text,
     imageUrl = imageUrl,
     videoUrl = videoUrl,
+    audioUrl = audioUrl,
+    audioDuration = audioDuration,
     htmlContent = htmlContent,
     generationId = generationId,
     assetId = assetId ?: "asset_${id.take(8)}"
@@ -164,6 +170,8 @@ data class CanvasCard(
     var text: String? = null,
     var imageUrl: String? = null,
     var videoUrl: String? = null,
+    var audioUrl: String? = null,
+    var audioDuration: Long? = null,
     var htmlContent: String? = null,
     var localBitmap: Bitmap? = null,
     var generationId: String? = null,
@@ -212,6 +220,13 @@ data class CanvasCard(
                 type = AssetType.VIDEO,
                 url = videoUrl,
                 box = normalizedBox
+            )
+            CardType.AUDIO -> AssetInput(
+                id = assetId,
+                type = AssetType.AUDIO,
+                url = audioUrl,
+                box = normalizedBox,
+                metadata = audioDuration?.let { mapOf("duration" to it.toString()) }
             )
         }
     }

@@ -3,6 +3,7 @@ package com.commonknowledge.scribbletablet.ui.toolbar
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,9 +13,13 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -32,12 +37,19 @@ import com.commonknowledge.scribbletablet.viewmodel.CanvasViewModel
 @Composable
 fun CanvasToolbar(
     viewModel: CanvasViewModel,
+    onOpenPhotoPicker: () -> Unit = {},
+    onOpenAudioRecorder: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val activeMode = viewModel.activeMode.value
     val isGenerating = viewModel.isGenerating.value
     val canUndo = viewModel.canUndo.value
     val canRedo = viewModel.canRedo.value
+    val isExpanded = viewModel.isCardExpanded.value
+    var showAttachmentMenu by remember { mutableStateOf(false) }
+
+    // Disabled opacity for expanded mode
+    val disabledAlpha = 0.2f
 
     Surface(
         modifier = modifier
@@ -47,7 +59,8 @@ fun CanvasToolbar(
                 shape = RoundedCornerShape(percent = 50),
                 ambientColor = Color.Black.copy(alpha = 0.08f),
                 spotColor = Color.Black.copy(alpha = 0.12f)
-            ),
+            )
+            .border(1.dp, Color.Black.copy(alpha = 0.1f), RoundedCornerShape(percent = 50)),
         shape = RoundedCornerShape(percent = 50),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
         tonalElevation = 4.dp
@@ -58,59 +71,116 @@ fun CanvasToolbar(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Undo button
+            // Undo button - disabled when expanded
             IconButton(
                 onClick = { viewModel.undo() },
-                enabled = canUndo,
-                modifier = Modifier.size(44.dp)
+                enabled = canUndo && !isExpanded,
+                modifier = Modifier
+                    .size(44.dp)
+                    .alpha(if (isExpanded) disabledAlpha else 1f)
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Undo,
                     contentDescription = "Undo",
-                    tint = if (canUndo) Color.Gray else Color.LightGray
+                    tint = if (canUndo && !isExpanded) Color.Gray else Color.LightGray
                 )
             }
 
-            // Redo button
+            // Redo button - disabled when expanded
             IconButton(
                 onClick = { viewModel.redo() },
-                enabled = canRedo,
-                modifier = Modifier.size(44.dp)
+                enabled = canRedo && !isExpanded,
+                modifier = Modifier
+                    .size(44.dp)
+                    .alpha(if (isExpanded) disabledAlpha else 1f)
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Redo,
                     contentDescription = "Redo",
-                    tint = if (canRedo) Color.Gray else Color.LightGray
+                    tint = if (canRedo && !isExpanded) Color.Gray else Color.LightGray
                 )
             }
 
             Spacer(modifier = Modifier.width(8.dp))
 
             // Tool buttons
+            // Ink button - disabled when expanded
             ToolButton(
                 icon = Icons.Outlined.Edit,
                 label = "Ink",
                 isSelected = activeMode == ToolMode.PERMANENT_INK,
+                isDisabled = isExpanded,
                 onClick = { viewModel.selectPermanentInk() }
             )
 
+            // Magic button - enabled when expanded
             ToolButton(
                 icon = Icons.Outlined.AutoAwesome,
                 label = "Magic",
                 isSelected = activeMode == ToolMode.MAGIC_INK,
+                isDisabled = false,
                 onClick = { viewModel.selectMagicInk() }
             )
 
+            // Select button - disabled when expanded
             ToolButton(
                 icon = Icons.Outlined.PanTool,
                 label = "Select",
                 isSelected = activeMode == ToolMode.MOVE,
+                isDisabled = isExpanded,
                 onClick = { viewModel.selectMoveMode() }
             )
 
+            // Flexible spacer to push plus button to center
             Spacer(modifier = Modifier.weight(1f))
 
-            // Eraser button
+            // Attachment menu button (centered) - disabled when expanded
+            Box(
+                modifier = Modifier.alpha(if (isExpanded) disabledAlpha else 1f)
+            ) {
+                IconButton(
+                    onClick = { if (!isExpanded) showAttachmentMenu = true },
+                    enabled = !isExpanded,
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Add,
+                        contentDescription = "Add attachment",
+                        tint = Color.Gray
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showAttachmentMenu,
+                    onDismissRequest = { showAttachmentMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("From Camera Roll") },
+                        onClick = {
+                            showAttachmentMenu = false
+                            onOpenPhotoPicker()
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Outlined.Photo, contentDescription = null)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Record Audio") },
+                        onClick = {
+                            showAttachmentMenu = false
+                            onOpenAudioRecorder()
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Outlined.Mic, contentDescription = null)
+                        }
+                    )
+                }
+            }
+
+            // Flexible spacer to push right items to the right
+            Spacer(modifier = Modifier.weight(1f))
+
+            // Eraser button - enabled when expanded
             IconButton(
                 onClick = { viewModel.selectEraser() },
                 modifier = Modifier
@@ -126,10 +196,13 @@ fun CanvasToolbar(
                 )
             }
 
-            // Clear button
+            // Clear button - disabled when expanded
             IconButton(
                 onClick = { viewModel.clearAllCards() },
-                modifier = Modifier.size(44.dp)
+                enabled = !isExpanded,
+                modifier = Modifier
+                    .size(44.dp)
+                    .alpha(if (isExpanded) disabledAlpha else 1f)
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Delete,
@@ -138,7 +211,7 @@ fun CanvasToolbar(
                 )
             }
 
-            // Play button
+            // Play button - enabled when expanded
             PlayButton(
                 isLoading = isGenerating,
                 onClick = { viewModel.play() }
@@ -152,12 +225,17 @@ private fun ToolButton(
     icon: ImageVector,
     label: String,
     isSelected: Boolean,
+    isDisabled: Boolean = false,
     onClick: () -> Unit
 ) {
+    val disabledAlpha = 0.2f
+
     Surface(
-        onClick = onClick,
+        onClick = { if (!isDisabled) onClick() },
+        enabled = !isDisabled,
         shape = RoundedCornerShape(10.dp),
-        color = if (isSelected) Color.Black else Color.Transparent
+        color = if (isSelected && !isDisabled) Color.Black else Color.Transparent,
+        modifier = Modifier.alpha(if (isDisabled) disabledAlpha else 1f)
     ) {
         Column(
             modifier = Modifier
@@ -168,13 +246,13 @@ private fun ToolButton(
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = if (isSelected) Color.White else Color.Gray,
+                tint = if (isSelected && !isDisabled) Color.White else Color.Gray,
                 modifier = Modifier.size(20.dp)
             )
             Text(
                 text = label,
                 fontSize = 10.sp,
-                color = if (isSelected) Color.White else Color.Gray
+                color = if (isSelected && !isDisabled) Color.White else Color.Gray
             )
         }
     }
