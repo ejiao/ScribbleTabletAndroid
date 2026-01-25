@@ -57,41 +57,35 @@ fun DrawingOverlay(
 }
 
 /**
- * Draw path with light smoothing - averages adjacent points for smoother curves
- * while maintaining good performance.
+ * Draw path with pressure-sensitive width - varies stroke width based on pen pressure.
+ * Uses individual segments for variable width rendering.
  */
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePathFast(path: DrawingPath) {
     if (path.points.size < 2) return
 
-    val linePath = Path()
     val points = path.points
-    val first = points[0]
-    linePath.moveTo(first.x, first.y)
+    val color = Color(path.color)
+    val baseWidth = path.strokeWidth
+    val minWidth = baseWidth * 0.3f
+    val maxWidth = baseWidth * 1.5f
 
-    if (points.size == 2) {
-        linePath.lineTo(points[1].x, points[1].y)
-    } else {
-        // Light smoothing: use midpoints between consecutive points
-        for (i in 1 until points.size - 1) {
-            val curr = points[i]
-            val next = points[i + 1]
-            val midX = (curr.x + next.x) / 2f
-            val midY = (curr.y + next.y) / 2f
-            linePath.quadraticBezierTo(curr.x, curr.y, midX, midY)
-        }
-        // Connect to last point
-        val last = points.last()
-        linePath.lineTo(last.x, last.y)
-    }
+    // Draw pressure-sensitive segments
+    for (i in 1 until points.size) {
+        val prev = points[i - 1]
+        val curr = points[i]
 
-    drawPath(
-        path = linePath,
-        color = Color(path.color),
-        style = androidx.compose.ui.graphics.drawscope.Stroke(
-            width = path.strokeWidth,
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round
+        // Interpolate pressure between points for smooth width transitions
+        val avgPressure = (prev.pressure + curr.pressure) / 2f
+        // Map pressure (typically 0-1) to stroke width
+        val strokeWidth = minWidth + (maxWidth - minWidth) * avgPressure.coerceIn(0f, 1f)
+
+        drawLine(
+            color = color,
+            start = Offset(prev.x, prev.y),
+            end = Offset(curr.x, curr.y),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round
         )
-    )
+    }
 }
 
