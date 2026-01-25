@@ -26,7 +26,8 @@ fun DrawingOverlay(
     // Read state values at composable level to trigger recomposition
     val currentPath = viewModel.currentPath.value
     // Read version to ensure recomposition on point additions (works with neverEqualPolicy)
-    val _ = viewModel.currentPathVersion.value
+    @Suppress("UNUSED_VARIABLE")
+    val pathVersion = viewModel.currentPathVersion.value
 
     // Read the snapshot state lists directly - they're already observable
     val permanentPaths = viewModel.permanentPaths
