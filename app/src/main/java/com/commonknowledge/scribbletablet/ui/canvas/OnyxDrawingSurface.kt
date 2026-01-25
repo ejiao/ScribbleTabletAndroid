@@ -2,10 +2,12 @@ package com.commonknowledge.scribbletablet.ui.canvas
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.util.AttributeSet
 import android.view.MotionEvent
-import android.view.View
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
@@ -14,24 +16,26 @@ import com.commonknowledge.scribbletablet.data.model.ToolMode
 import com.commonknowledge.scribbletablet.viewmodel.CanvasViewModel
 
 /**
- * A View for Onyx SDK pen input capture.
+ * A SurfaceView for Onyx SDK hardware-accelerated pen drawing.
  *
- * This view captures stylus input using the Onyx SDK TouchHelper.
- * The SDK provides optimized pen input tracking with pressure sensitivity.
- * We handle all rendering ourselves via Compose.
+ * Key insight from Onyx SDK docs:
+ * - setRawDrawingRenderEnabled(FALSE) = Direct e-ink hardware rendering (LOWEST latency)
+ * - setRawDrawingRenderEnabled(TRUE) = SDK software rendering (higher latency)
  *
- * Key points:
- * 1. TouchHelper.create(view, callback) initializes the helper
- * 2. setLimitRect() must be called BEFORE openRawDrawing()
- * 3. openRawDrawing() enables raw drawing mode
- * 4. setRawDrawingEnabled(true) starts accepting input
- * 5. Callbacks fire on background thread - we synchronize to main thread
+ * The SDK renders strokes directly to the e-ink display at hardware level.
+ * We just receive callbacks to update our data model.
+ * Our Compose rendering is secondary/backup display.
+ *
+ * Workflow for minimal latency:
+ * 1. openRawDrawing() - initialize
+ * 2. setRawDrawingRenderEnabled(false) - enable direct e-ink rendering
+ * 3. setRawDrawingEnabled(true) - start accepting input
  */
 class OnyxDrawingSurfaceView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0
-) : View(context, attrs, defStyleAttr) {
+) : SurfaceView(context, attrs, defStyleAttr), SurfaceHolder.Callback {
 
     private var touchHelper: com.onyx.android.sdk.pen.TouchHelper? = null
     private var callback: Callback? = null
@@ -48,34 +52,37 @@ class OnyxDrawingSurfaceView @JvmOverloads constructor(
     }
 
     init {
+        // SurfaceView setup for Onyx SDK
+        holder.addCallback(this)
+        holder.setFormat(PixelFormat.TRANSPARENT)
+        setZOrderOnTop(true)
+
         // Required for touch events
         isFocusable = true
         isFocusableInTouchMode = true
-
-        // Make view transparent - we only use it for input
-        setBackgroundColor(Color.TRANSPARENT)
     }
 
     fun setCallback(callback: Callback) {
         this.callback = callback
     }
 
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        android.util.Log.d("OnyxDrawingSurface", "onSizeChanged: ${w}x${h}")
-
-        if (w > 0 && h > 0) {
-            if (!isInitialized) {
-                initTouchHelper()
-            } else {
-                // Update limit rect when size changes
-                touchHelper?.let { helper ->
-                    val rect = Rect(0, 0, w, h)
-                    helper.setLimitRect(rect, emptyList())
-                    android.util.Log.d("OnyxDrawingSurface", "Updated limit rect: $rect")
-                }
-            }
+    override fun surfaceCreated(holder: SurfaceHolder) {
+        // Initialize TouchHelper when surface is ready
+        if (!isInitialized && width > 0 && height > 0) {
+            initTouchHelper()
         }
+    }
+
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        // Update limit rect when size changes
+        touchHelper?.let { helper ->
+            val rect = Rect(0, 0, width, height)
+            helper.setLimitRect(rect, emptyList())
+        }
+    }
+
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        cleanup()
     }
 
     private fun initTouchHelper() {
@@ -187,19 +194,19 @@ class OnyxDrawingSurfaceView @JvmOverloads constructor(
 
             // Open raw drawing mode
             helper.openRawDrawing()
-            android.util.Log.d("OnyxDrawingSurface", "Raw drawing opened")
+
+            // CRITICAL: setRawDrawingRenderEnabled(false) enables DIRECT e-ink hardware rendering
+            // This is counterintuitive but documented in Onyx SDK:
+            // - false = Direct e-ink rendering (LOWEST latency, hardware accelerated)
+            // - true = SDK software rendering (higher latency)
+            try {
+                helper.setRawDrawingRenderEnabled(false)
+            } catch (e: Exception) {
+                // Fallback if method not available
+            }
 
             // Enable raw drawing input
             helper.setRawDrawingEnabled(true)
-            android.util.Log.d("OnyxDrawingSurface", "Raw drawing enabled")
-
-            // Try to enable SDK's direct rendering to e-ink
-            try {
-                helper.setRawDrawingRenderEnabled(true)
-                android.util.Log.d("OnyxDrawingSurface", "Raw drawing render enabled")
-            } catch (e: Exception) {
-                android.util.Log.w("OnyxDrawingSurface", "setRawDrawingRenderEnabled not available: ${e.message}")
-            }
 
             touchHelper = helper
             isDrawingEnabled = true
