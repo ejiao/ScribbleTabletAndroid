@@ -76,79 +76,65 @@ fun DrawingOverlay(
 }
 
 /**
- * Draw path using simple line segments - fast and minimal smoothing.
+ * Draw path using a single batched path - fastest rendering.
  */
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePathFast(path: DrawingPath) {
     if (path.points.size < 2) return
 
-    val color = Color(path.color)
-    val strokeWidth = path.strokeWidth
+    // Use a single Path object for batched rendering (faster than individual drawLine calls)
+    val linePath = Path()
+    val first = path.points[0]
+    linePath.moveTo(first.x, first.y)
 
-    // Draw simple line segments - much faster than bezier curves
     for (i in 1 until path.points.size) {
-        val prev = path.points[i - 1]
-        val curr = path.points[i]
-        drawLine(
-            color = color,
-            start = Offset(prev.x, prev.y),
-            end = Offset(curr.x, curr.y),
-            strokeWidth = strokeWidth,
-            cap = StrokeCap.Round
-        )
+        linePath.lineTo(path.points[i].x, path.points[i].y)
     }
+
+    drawPath(
+        path = linePath,
+        color = Color(path.color),
+        style = androidx.compose.ui.graphics.drawscope.Stroke(
+            width = path.strokeWidth,
+            cap = StrokeCap.Round,
+            join = StrokeJoin.Round
+        )
+    )
 }
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMagicInkShimmerOverlay(
     path: DrawingPath,
     time: Float
 ) {
-    if (path.points.size < 2) return
+    if (path.points.size < 4) return
 
     val random = Random(path.hashCode())
-
-    // Draw shimmer segments along the path
-    val numShimmers = 8
     val baseColor = Color(path.color)
 
-    for (shimmerIndex in 0 until numShimmers) {
+    // Reduced shimmer count for performance
+    for (shimmerIndex in 0 until 4) {
         val shimmerSeed = random.nextInt(1000)
-        val speed = 0.02f + random.nextFloat() * 0.03f
-        val shimmerPosition = ((time * speed + shimmerSeed) % 100f) / 100f
-
+        val shimmerPosition = ((time * 0.03f + shimmerSeed) % 100f) / 100f
         val pointIndex = (shimmerPosition * (path.points.size - 1)).toInt()
-            .coerceIn(0, path.points.size - 1)
-
-        val phase = ((time * 0.1f + shimmerSeed) % 50f)
-        val intensity = when {
-            phase < 15f -> phase / 15f
-            phase < 35f -> 1f
-            else -> 1f - (phase - 35f) / 15f
+        val intensity = ((time * 0.1f + shimmerSeed) % 50f).let { phase ->
+            when {
+                phase < 15f -> phase / 15f
+                phase < 35f -> 1f
+                else -> 1f - (phase - 35f) / 15f
+            }
         }.coerceIn(0f, 1f)
 
-        val segmentRadius = 3
-        val startIdx = maxOf(0, pointIndex - segmentRadius)
-        val endIdx = minOf(path.points.size - 1, pointIndex + segmentRadius)
+        val startIdx = maxOf(0, pointIndex - 2)
+        val endIdx = minOf(path.points.size - 1, pointIndex + 2)
 
         if (endIdx > startIdx) {
-            val highlightColor = Color(
-                red = minOf(1f, baseColor.red + 0.3f * intensity),
-                green = minOf(1f, baseColor.green + 0.2f * intensity),
-                blue = minOf(1f, baseColor.blue + 0.1f * intensity),
-                alpha = 0.6f * intensity
+            val highlightColor = Color.White.copy(alpha = 0.5f * intensity)
+            drawLine(
+                color = highlightColor,
+                start = Offset(path.points[startIdx].x, path.points[startIdx].y),
+                end = Offset(path.points[endIdx].x, path.points[endIdx].y),
+                strokeWidth = path.strokeWidth * 0.5f,
+                cap = StrokeCap.Round
             )
-
-            // Draw shimmer as simple lines
-            for (i in startIdx + 1..endIdx) {
-                val prev = path.points[i - 1]
-                val curr = path.points[i]
-                drawLine(
-                    color = highlightColor,
-                    start = Offset(prev.x, prev.y),
-                    end = Offset(curr.x, curr.y),
-                    strokeWidth = path.strokeWidth * 0.6f,
-                    cap = StrokeCap.Round
-                )
-            }
         }
     }
 }

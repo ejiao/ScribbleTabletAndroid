@@ -227,6 +227,15 @@ class CanvasViewModel : ViewModel() {
 
     fun addToPath(x: Float, y: Float, pressure: Float = 1f) {
         currentPath.value?.let { path ->
+            // Skip points that are too close together (reduces rendering load)
+            val lastPoint = path.points.lastOrNull()
+            if (lastPoint != null) {
+                val dx = x - lastPoint.x
+                val dy = y - lastPoint.y
+                val distSq = dx * dx + dy * dy
+                if (distSq < 4f) return  // Skip if less than 2px apart
+            }
+
             // Mutate the existing path's points list directly
             path.points.add(PathPoint(x, y, pressure))
             // Increment version to trigger recomposition (neverEqualPolicy ensures this works)
