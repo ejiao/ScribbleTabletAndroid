@@ -92,44 +92,32 @@ class OnyxDrawingSurfaceView @JvmOverloads constructor(
             val rawCallback = object : com.onyx.android.sdk.pen.RawInputCallback() {
                 override fun onBeginRawDrawing(b: Boolean, touchPoint: com.onyx.android.sdk.data.note.TouchPoint) {
                     val point = touchPoint.toPathPoint()
-                    val timestamp = System.currentTimeMillis()
-                    android.util.Log.d("OnyxDrawingSurface", "[$timestamp] onBeginRawDrawing: ${point.x}, ${point.y}")
-
-                    // Execute immediately if on main thread, otherwise post
+                    // Use postAtFrontOfQueue for lowest latency when not on main thread
                     if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
                         callback?.onBeginDrawing(point)
                     } else {
-                        mainHandler.post { callback?.onBeginDrawing(point) }
+                        mainHandler.postAtFrontOfQueue { callback?.onBeginDrawing(point) }
                     }
                 }
 
                 override fun onRawDrawingTouchPointMoveReceived(touchPoint: com.onyx.android.sdk.data.note.TouchPoint) {
                     val point = touchPoint.toPathPoint()
-                    val timestamp = System.currentTimeMillis()
-                    android.util.Log.v("OnyxDrawingSurface", "[$timestamp] onRawDrawingTouchPointMoveReceived: ${point.x}, ${point.y}")
-
                     if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
                         callback?.onDrawingMove(point)
                     } else {
-                        mainHandler.post { callback?.onDrawingMove(point) }
+                        mainHandler.postAtFrontOfQueue { callback?.onDrawingMove(point) }
                     }
                 }
 
                 override fun onRawDrawingTouchPointListReceived(touchPointList: com.onyx.android.sdk.pen.data.TouchPointList) {
-                    val timestamp = System.currentTimeMillis()
                     val count = touchPointList.size()
-                    android.util.Log.d("OnyxDrawingSurface", "[$timestamp] onRawDrawingTouchPointListReceived: $count points")
-
-                    // Process all points from batch
-                    val points = mutableListOf<PathPoint>()
-                    for (i in 0 until count) {
-                        points.add(touchPointList.get(i).toPathPoint())
-                    }
+                    // Pre-convert all points to avoid work on main thread
+                    val points = Array(count) { i -> touchPointList.get(i).toPathPoint() }
 
                     if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
                         points.forEach { callback?.onDrawingMove(it) }
                     } else {
-                        mainHandler.post {
+                        mainHandler.postAtFrontOfQueue {
                             points.forEach { callback?.onDrawingMove(it) }
                         }
                     }
@@ -137,47 +125,38 @@ class OnyxDrawingSurfaceView @JvmOverloads constructor(
 
                 override fun onEndRawDrawing(b: Boolean, touchPoint: com.onyx.android.sdk.data.note.TouchPoint) {
                     val point = touchPoint.toPathPoint()
-                    val timestamp = System.currentTimeMillis()
-                    android.util.Log.d("OnyxDrawingSurface", "[$timestamp] onEndRawDrawing")
-
                     if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
                         callback?.onEndDrawing(point)
                     } else {
-                        mainHandler.post { callback?.onEndDrawing(point) }
+                        mainHandler.postAtFrontOfQueue { callback?.onEndDrawing(point) }
                     }
                 }
 
                 override fun onBeginRawErasing(b: Boolean, touchPoint: com.onyx.android.sdk.data.note.TouchPoint) {
                     val point = touchPoint.toPathPoint()
-                    android.util.Log.d("OnyxDrawingSurface", "onBeginRawErasing")
-
                     if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
                         callback?.onBeginErasing(point)
                     } else {
-                        mainHandler.post { callback?.onBeginErasing(point) }
+                        mainHandler.postAtFrontOfQueue { callback?.onBeginErasing(point) }
                     }
                 }
 
                 override fun onRawErasingTouchPointMoveReceived(touchPoint: com.onyx.android.sdk.data.note.TouchPoint) {
                     val point = touchPoint.toPathPoint()
-
                     if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
                         callback?.onErasingMove(point)
                     } else {
-                        mainHandler.post { callback?.onErasingMove(point) }
+                        mainHandler.postAtFrontOfQueue { callback?.onErasingMove(point) }
                     }
                 }
 
                 override fun onRawErasingTouchPointListReceived(touchPointList: com.onyx.android.sdk.pen.data.TouchPointList) {
-                    val points = mutableListOf<PathPoint>()
-                    for (i in 0 until touchPointList.size()) {
-                        points.add(touchPointList.get(i).toPathPoint())
-                    }
-
+                    val count = touchPointList.size()
+                    val points = Array(count) { i -> touchPointList.get(i).toPathPoint() }
                     if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
                         points.forEach { callback?.onErasingMove(it) }
                     } else {
-                        mainHandler.post {
+                        mainHandler.postAtFrontOfQueue {
                             points.forEach { callback?.onErasingMove(it) }
                         }
                     }
@@ -185,12 +164,10 @@ class OnyxDrawingSurfaceView @JvmOverloads constructor(
 
                 override fun onEndRawErasing(b: Boolean, touchPoint: com.onyx.android.sdk.data.note.TouchPoint) {
                     val point = touchPoint.toPathPoint()
-                    android.util.Log.d("OnyxDrawingSurface", "onEndRawErasing")
-
                     if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
                         callback?.onEndErasing(point)
                     } else {
-                        mainHandler.post { callback?.onEndErasing(point) }
+                        mainHandler.postAtFrontOfQueue { callback?.onEndErasing(point) }
                     }
                 }
             }

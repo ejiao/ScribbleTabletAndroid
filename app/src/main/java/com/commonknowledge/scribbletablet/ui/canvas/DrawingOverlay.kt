@@ -57,18 +57,31 @@ fun DrawingOverlay(
 }
 
 /**
- * Draw path using a single batched path - fastest rendering.
+ * Draw path with light smoothing - averages adjacent points for smoother curves
+ * while maintaining good performance.
  */
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePathFast(path: DrawingPath) {
     if (path.points.size < 2) return
 
-    // Use a single Path object for batched rendering (faster than individual drawLine calls)
     val linePath = Path()
-    val first = path.points[0]
+    val points = path.points
+    val first = points[0]
     linePath.moveTo(first.x, first.y)
 
-    for (i in 1 until path.points.size) {
-        linePath.lineTo(path.points[i].x, path.points[i].y)
+    if (points.size == 2) {
+        linePath.lineTo(points[1].x, points[1].y)
+    } else {
+        // Light smoothing: use midpoints between consecutive points
+        for (i in 1 until points.size - 1) {
+            val curr = points[i]
+            val next = points[i + 1]
+            val midX = (curr.x + next.x) / 2f
+            val midY = (curr.y + next.y) / 2f
+            linePath.quadraticBezierTo(curr.x, curr.y, midX, midY)
+        }
+        // Connect to last point
+        val last = points.last()
+        linePath.lineTo(last.x, last.y)
     }
 
     drawPath(
