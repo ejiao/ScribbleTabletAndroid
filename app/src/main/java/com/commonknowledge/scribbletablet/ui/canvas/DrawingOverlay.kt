@@ -1,16 +1,14 @@
 package com.commonknowledge.scribbletablet.ui.canvas
 
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.withTransform
 import com.commonknowledge.scribbletablet.data.model.DrawingPath
 import com.commonknowledge.scribbletablet.viewmodel.CanvasViewModel
-import kotlin.random.Random
 
 /**
  * Overlay that renders drawing paths above cards.
@@ -34,42 +32,24 @@ fun DrawingOverlay(
     val permanentPaths = viewModel.permanentPaths
     val magicPaths = viewModel.magicPaths
 
-    // Check if we have any magic ink to animate
-    val hasMagicInk = magicPaths.isNotEmpty() || (currentPath?.isMagicInk == true)
-
-    // Shimmer animation - always create but only use when there's magic ink
-    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
-    val shimmerTime by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1000f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(10000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "shimmerTime"
-    )
-
     Canvas(modifier = modifier.fillMaxSize()) {
         withTransform({
             translate(offsetX, offsetY)
             scale(scale, scale, Offset.Zero)
         }) {
-            // Draw permanent paths (use fast rendering - minimal smoothing)
+            // Draw permanent paths
             permanentPaths.forEach { path ->
                 drawStrokePathFast(path)
             }
 
-            // Draw magic paths with shimmer effect
+            // Draw magic paths
             magicPaths.forEach { path ->
                 drawStrokePathFast(path)
-                drawMagicInkShimmerOverlay(path, shimmerTime)
             }
 
-            // Draw current path (the one being actively drawn)
-            // Use fast line-based rendering for lower latency during active drawing
+            // Draw current path
             currentPath?.let { path ->
                 drawStrokePathFast(path)
-                // Skip shimmer during active drawing for performance
             }
         }
     }
@@ -101,40 +81,3 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePathFast(
     )
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMagicInkShimmerOverlay(
-    path: DrawingPath,
-    time: Float
-) {
-    if (path.points.size < 4) return
-
-    val random = Random(path.hashCode())
-    val baseColor = Color(path.color)
-
-    // Reduced shimmer count for performance
-    for (shimmerIndex in 0 until 4) {
-        val shimmerSeed = random.nextInt(1000)
-        val shimmerPosition = ((time * 0.03f + shimmerSeed) % 100f) / 100f
-        val pointIndex = (shimmerPosition * (path.points.size - 1)).toInt()
-        val intensity = ((time * 0.1f + shimmerSeed) % 50f).let { phase ->
-            when {
-                phase < 15f -> phase / 15f
-                phase < 35f -> 1f
-                else -> 1f - (phase - 35f) / 15f
-            }
-        }.coerceIn(0f, 1f)
-
-        val startIdx = maxOf(0, pointIndex - 2)
-        val endIdx = minOf(path.points.size - 1, pointIndex + 2)
-
-        if (endIdx > startIdx) {
-            val highlightColor = Color.White.copy(alpha = 0.5f * intensity)
-            drawLine(
-                color = highlightColor,
-                start = Offset(path.points[startIdx].x, path.points[startIdx].y),
-                end = Offset(path.points[endIdx].x, path.points[endIdx].y),
-                strokeWidth = path.strokeWidth * 0.5f,
-                cap = StrokeCap.Round
-            )
-        }
-    }
-}
