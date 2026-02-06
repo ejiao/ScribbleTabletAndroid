@@ -173,15 +173,12 @@ fun CanvasScreen(
             }
         )
 
-        // Onyx drawing surface - DISABLED
-        // The Onyx SDK cannot access raw input devices on this device/Android version.
-        // Falling back to Compose-based drawing which works but is slower.
-        // TODO: Re-enable if Onyx SDK issues are resolved
-        // OnyxDrawingSurface(
-        //     viewModel = viewModel,
-        //     modifier = Modifier.fillMaxSize().zIndex(160f),
-        //     isVisible = !showingWorkspaceMenu && !viewModel.isCardExpanded.value
-        // )
+        // Onyx drawing surface - uses hardware-accelerated pen input on Boox devices
+        OnyxDrawingSurface(
+            viewModel = viewModel,
+            modifier = Modifier.fillMaxSize().zIndex(160f),
+            isVisible = !showingWorkspaceMenu && !viewModel.isCardExpanded.value
+        )
 
         // Expanded card overlay - rendered below toolbar (zIndex 190 < toolbar 200)
         val expandedCardId = viewModel.expandedCardId.value

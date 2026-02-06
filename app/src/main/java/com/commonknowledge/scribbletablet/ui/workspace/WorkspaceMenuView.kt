@@ -55,7 +55,8 @@ fun WorkspaceMenuView(
     AnimatedVisibility(
         visible = isOpen,
         enter = fadeIn(animationSpec = tween(200)),
-        exit = fadeOut(animationSpec = tween(200))
+        exit = fadeOut(animationSpec = tween(200)),
+        modifier = modifier // Apply zIndex to overlay too
     ) {
         Box(
             modifier = Modifier
@@ -75,10 +76,11 @@ fun WorkspaceMenuView(
         exit = slideOutHorizontally(
             targetOffsetX = { -it },
             animationSpec = tween(250)
-        )
+        ),
+        modifier = modifier // Apply zIndex to menu
     ) {
         Box(
-            modifier = modifier
+            modifier = Modifier
                 .fillMaxHeight()
                 .width(280.dp) // Match iOS width
                 .shadow(16.dp)

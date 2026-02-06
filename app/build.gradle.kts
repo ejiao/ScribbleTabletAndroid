@@ -90,6 +90,8 @@ dependencies {
         // Exclude old support library to avoid conflicts with AndroidX
         exclude(group = "com.android.support")
     }
+    // Hidden API bypass - required for Onyx SDK to access pen input on Android 9+
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:4.3")
 
     debugImplementation(libs.androidx.ui.tooling)
 }

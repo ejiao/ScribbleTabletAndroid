@@ -6,8 +6,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import kotlinx.coroutines.delay
 import kotlin.math.max
 
@@ -80,36 +80,29 @@ private fun SingleRipple(
     }
 
     val progress = animationProgress.value
-    val alpha = 1f - progress // Fade out as ripple expands
+    // Constant opacity that fades out over time
+    val alpha = (1f - progress) * 0.6f
 
     Canvas(modifier = modifier.fillMaxSize()) {
         val centerX = size.width / 2
         val centerY = size.height / 2
         val maxDimension = max(size.width, size.height)
 
-        // Ripple expands from 20% to 180% of viewport
-        val startRadius = maxDimension * 0.1f
-        val endRadius = maxDimension * 0.9f
+        // Ripple expands from center outward
+        val startRadius = maxDimension * 0.05f
+        val endRadius = maxDimension * 1.0f
         val currentRadius = startRadius + (endRadius - startRadius) * progress
 
-        // Gray color so it doesn't blend with green magic ink
-        val rippleColor = Color(0xFF424242) // Dark gray
+        // Dark gray color
+        val rippleColor = Color(0xFF333333)
 
-        // Draw radial gradient ripple (lower opacity so magic ink stays visible above)
-        val gradient = Brush.radialGradient(
-            colors = listOf(
-                rippleColor.copy(alpha = alpha * 0.3f),
-                rippleColor.copy(alpha = alpha * 0.15f),
-                rippleColor.copy(alpha = 0f)
-            ),
-            center = Offset(centerX, centerY),
-            radius = currentRadius
-        )
-
+        // Draw ring with constant opacity (thick stroke)
+        val strokeWidth = maxDimension * 0.15f
         drawCircle(
-            brush = gradient,
+            color = rippleColor.copy(alpha = alpha),
             radius = currentRadius,
-            center = Offset(centerX, centerY)
+            center = Offset(centerX, centerY),
+            style = Stroke(width = strokeWidth)
         )
     }
 }
