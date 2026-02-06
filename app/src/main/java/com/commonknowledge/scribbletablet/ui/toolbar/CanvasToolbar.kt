@@ -101,6 +101,23 @@ fun CanvasToolbar(
                 )
             }
 
+            // Pixel eraser button (right of undo/redo)
+            IconButton(
+                onClick = { viewModel.selectEraser() },
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (activeMode == ToolMode.ERASER) Color.Black else Color.White.copy(alpha = 0.8f)
+                    )
+                    .border(1.dp, Color.Gray.copy(alpha = 0.1f), CircleShape)
+            ) {
+                PixelEraserIcon(
+                    tint = if (activeMode == ToolMode.ERASER) Color.White else Color.Gray,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
             Spacer(modifier = Modifier.width(8.dp))
 
             // Tool buttons
@@ -179,22 +196,6 @@ fun CanvasToolbar(
 
             // Flexible spacer to push right items to the right
             Spacer(modifier = Modifier.weight(1f))
-
-            // Eraser button - enabled when expanded
-            IconButton(
-                onClick = { viewModel.selectEraser() },
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (activeMode == ToolMode.ERASER) Color.Black else Color.Transparent
-                    )
-            ) {
-                EraserIcon(
-                    tint = if (activeMode == ToolMode.ERASER) Color.White else Color.Gray,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
 
             // Clear button - disabled when expanded
             IconButton(
@@ -342,6 +343,48 @@ private fun EraserIcon(
             start = Offset(width * 0.45f, height * 0.22f),
             end = Offset(width * 0.2f, height * 0.72f),
             strokeWidth = 2.dp.toPx()
+        )
+    }
+}
+
+@Composable
+private fun PixelEraserIcon(
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val width = size.width
+        val height = size.height
+
+        // Draw filled eraser body (angled rectangle) - pixel eraser is filled
+        val path = Path().apply {
+            // Start from top-left of eraser body
+            moveTo(width * 0.15f, height * 0.35f)
+            // Top edge
+            lineTo(width * 0.7f, height * 0.1f)
+            // Right edge (rounded tip area)
+            lineTo(width * 0.95f, height * 0.35f)
+            // Bottom-right
+            lineTo(width * 0.85f, height * 0.65f)
+            // Bottom edge going back
+            lineTo(width * 0.3f, height * 0.9f)
+            // Left edge
+            lineTo(width * 0.05f, height * 0.65f)
+            close()
+        }
+
+        // Fill the eraser body
+        drawPath(
+            path = path,
+            color = tint
+        )
+
+        // Draw dividing line (between eraser tip and body) in contrasting color
+        drawLine(
+            color = if (tint == Color.White) Color.Black else Color.White,
+            start = Offset(width * 0.45f, height * 0.22f),
+            end = Offset(width * 0.2f, height * 0.72f),
+            strokeWidth = 1.5f.dp.toPx()
         )
     }
 }
