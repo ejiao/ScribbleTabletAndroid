@@ -11,6 +11,7 @@ import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
+import android.graphics.PixelFormat
 import androidx.compose.runtime.*
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -111,6 +112,9 @@ class OnyxDrawingSurfaceView @JvmOverloads constructor(
     }
 
     init {
+        // Make surface transparent so DrawingOverlay can show saved strokes below
+        setZOrderOnTop(true)
+        holder.setFormat(PixelFormat.TRANSPARENT)
         holder.addCallback(this)
         // Don't set focusable - we only want stylus input, not finger touches
         isFocusable = false
@@ -232,7 +236,8 @@ class OnyxDrawingSurfaceView @JvmOverloads constructor(
 
     private fun cleanSurfaceView(): Boolean {
         val canvas = holder.lockCanvas() ?: return false
-        canvas.drawColor(Color.WHITE)
+        // Clear with transparent to let DrawingOverlay show through
+        canvas.drawColor(Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
         holder.unlockCanvasAndPost(canvas)
         return true
     }
