@@ -44,6 +44,7 @@ class OnyxDrawingSurfaceView @JvmOverloads constructor(
     private var isInitialized = false
 
     interface Callback {
+        fun onBeginDrawing(point: PathPoint)
         fun onStrokeComplete(points: List<PathPoint>)
         fun onBeginErasing(point: PathPoint)
         fun onErasingMove(point: PathPoint)
@@ -58,6 +59,8 @@ class OnyxDrawingSurfaceView @JvmOverloads constructor(
             Log.d(TAG, "onBeginRawDrawing: x=${touchPoint.x}, y=${touchPoint.y}")
             strokeBuffer.clear()
             strokeBuffer.add(touchPoint)
+            // Notify callback so it can capture canvas offset/scale at stroke start
+            callback?.onBeginDrawing(PathPoint(touchPoint.x, touchPoint.y, touchPoint.pressure))
         }
 
         override fun onRawDrawingTouchPointMoveReceived(touchPoint: TouchPoint) {
@@ -294,23 +297,33 @@ fun OnyxDrawingSurface(
         modifier = stylusOnlyModifier,
         factory = { context ->
             OnyxDrawingSurfaceView(context).apply {
+                // Capture canvas transform at stroke start to avoid position drift during panning
+                var strokeStartScale = 1f
+                var strokeStartOffsetX = 0f
+                var strokeStartOffsetY = 0f
+                var strokeStartMode = ToolMode.PERMANENT_INK
+
                 setCallback(object : OnyxDrawingSurfaceView.Callback {
+                    override fun onBeginDrawing(point: PathPoint) {
+                        // Capture canvas offset/scale immediately when stroke starts
+                        strokeStartScale = viewModel.canvasScale.value
+                        strokeStartOffsetX = viewModel.canvasOffsetX.value
+                        strokeStartOffsetY = viewModel.canvasOffsetY.value
+                        strokeStartMode = viewModel.activeMode.value
+                    }
+
                     override fun onStrokeComplete(points: List<PathPoint>) {
                         if (points.size >= 2) {
-                            val scale = viewModel.canvasScale.value
-                            val offsetX = viewModel.canvasOffsetX.value
-                            val offsetY = viewModel.canvasOffsetY.value
-                            val mode = viewModel.activeMode.value
-
-                            // Transform from screen to canvas coordinates
+                            // Use the offset/scale captured at stroke START, not current values
+                            // This prevents position drift if user pans during stroke
                             val canvasPoints = points.map { p ->
                                 PathPoint(
-                                    (p.x - offsetX) / scale,
-                                    (p.y - offsetY) / scale,
+                                    (p.x - strokeStartOffsetX) / strokeStartScale,
+                                    (p.y - strokeStartOffsetY) / strokeStartScale,
                                     p.pressure
                                 )
                             }
-                            viewModel.addCompleteStroke(canvasPoints, mode)
+                            viewModel.addCompleteStroke(canvasPoints, strokeStartMode)
                         }
                     }
 
